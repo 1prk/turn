@@ -11,11 +11,18 @@
   Sim.gon = function (rad) { return rad * 200 / Math.PI; };
 
   /* Vehicles that are ready to use. All lengths are in meters.
+   * The rear axle in the model is the center of the rear axles. For a vehicle with two rear axles,
+   * wb is the distance from the front axle to the center between the two rear axles.
+   * The rear overhang starts at this center.
    * track = track width. The program uses it only to draw the wheels.
+   * gap = distance between the two rear axles. The program uses it only to draw the axles. 0 = one rear axle.
+   * trail = true when the rearmost axle is steered (trailing steered axle). The program uses it only to draw the wheels.
    * ratio = steering ratio. It is the steering wheel angle divided by the road wheel angle. */
   Sim.PRESETS = [
-    { name: 'PKW', wb: 2.86, front: 0.92, rear: 1.10, width: 1.89, rOuter: 5.85, track: 1.60, ratio: 13, preset: true },
-    { name: 'LKW', wb: 5.17, front: 1.36, rear: 2.69, width: 2.30, rOuter: 9.46, track: 1.90, ratio: 20, preset: true }
+    { name: 'PKW', wb: 2.86, front: 0.92, rear: 1.10, width: 1.89, rOuter: 5.85, track: 1.60, ratio: 13, gap: 0, trail: false, preset: true },
+    { name: 'LKW', wb: 5.17, front: 1.36, rear: 2.69, width: 2.30, rOuter: 9.46, track: 1.90, ratio: 20, gap: 0, trail: false, preset: true },
+    { name: 'Müllfahrzeug 3-achsig', wb: 4.77, front: 1.53, rear: 3.60, width: 2.55, rOuter: 10.25, track: 2.00, ratio: 20, gap: 1.35, trail: false, preset: true },
+    { name: 'Müllfahrzeug 3-achsig Nachlaufachse', wb: 3.90, front: 1.35, rear: 4.70, width: 2.55, rOuter: 8.60, track: 2.00, ratio: 20, gap: 1.35, trail: true, preset: true }
   ];
   Sim.DEFAULT_VEHICLE = Object.assign({}, Sim.PRESETS[0]);
 

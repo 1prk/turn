@@ -51,7 +51,8 @@ PKW 5,85 m, LKW 9,45 m bei 9,46 m).
 | `Esc` / `Enter` | Fahrlinie beenden (zuerst wird Unfertiges verworfen) |
 | `M` | Maßstab setzen |
 | `⌫` / `Entf` / `Strg+Z` | letzten Punkt zurück |
-| `1`–`9` | Fahrzeug wählen |
+| `1`–`9` | Fahrzeug wählen (für die gewählte Fahrkurve) |
+| `[` / `]` | Fahrkurve wechseln |
 | `P` | Abspielen / Pause |
 | `0` / `Pos1` | Ansicht einpassen |
 | `+` / `-` | Zoom |
@@ -60,8 +61,25 @@ PKW 5,85 m, LKW 9,45 m bei 9,46 m).
 ## Fahrzeuge
 Oben in Abschnitt 3 stehen die Fahrzeuge als Reiter. Mit **+** entsteht eine Kopie des gewählten Fahrzeugs unter neuem
 Namen. Eigene Fahrzeuge lassen sich löschen. Alle Fahrzeuge und Änderungen bleiben im Browser (localStorage) erhalten.
-Voreinstellungen: **PKW** und **LKW** (Radstand 5,17 m, Überhang 1,36 m / 2,69 m, Breite 2,30 m, Wendekreis außen
-9,46 m, Lenkübersetzung 20 → max. Lenkwinkel ≈ 46,9 gon).
+Voreinstellungen (Maße in m, Überhang hinten und Radstand beziehen sich bei mehreren Hinterachsen auf deren **Mitte**):
+
+| Fahrzeug | Länge | Radstand | Überhang vorn | Überhang hinten | Breite | Wendekreis außen | max. Lenkwinkel |
+|---|---|---|---|---|---|---|---|
+| PKW | 4,88 | 2,86 | 0,92 | 1,10 | 1,89 | 5,85 | 43,4 gon |
+| LKW | 9,22 | 5,17 | 1,36 | 2,69 | 2,30 | 9,46 | 46,9 gon |
+| Müllfahrzeug 3-achsig | 9,90 | 4,77 | 1,53 | 3,60 | 2,55 | 10,25 | 38,9 gon |
+| Müllfahrzeug 3-achsig Nachlaufachse | 9,95 | 3,90 | 1,35 | 4,70 | 2,55 | 8,60 | 39,1 gon |
+
+Die Fahrzeuge mit drei Achsen werden mit drei Achsen gezeichnet. Die Hinterachse im Modell ist die Mitte der beiden
+hinteren Achsen. Der **Abstand der Hinterachsen** (1,35 m) ist eine Annahme und wirkt nur auf die Darstellung, nicht
+auf die Berechnung. Bei der Nachlaufachse lenkt die hinterste Achse in der Darstellung gegen. Die Berechnung benutzt
+nur Radstand, Überhänge, Breite und Wendekreis. Spurweite und Lenkübersetzung sind ebenfalls Annahmen (Darstellung).
+
+## Fahrkurven
+Wie bei den Fahrzeugen gibt es in Abschnitt 4 eine Liste von **Fahrkurven** mit **+**. Jede Fahrkurve hat eigene Punkte
+und ein eigenes Fahrzeug (Reiter in Abschnitt 3 wählt das Fahrzeug der gewählten Fahrkurve). Die gewählte Fahrkurve ist
+blau und lässt sich bearbeiten. Die anderen sind abgeblendet in eigenen Farben sichtbar. Die Tasten `[` und `]` wechseln
+die Fahrkurve. Die Fahrkurven werden nicht im Browser gespeichert, weil sie vom Plan und vom Maßstab abhängen.
 
 ## Schleppkurve und Leitlinie
 Die Vorderräder werden auf der Leitlinie geführt. Sie besteht aus Geraden und Kreisbögen, an denen ein Punkt des

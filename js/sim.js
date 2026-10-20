@@ -7,16 +7,14 @@
   const Sim = {};
   const hyp = Math.hypot;
 
-  Sim.DEFAULT_VEHICLE = {
-    name: 'PKW',
-    wb: 2.86,      // wheelbase
-    front: 0.92,   // front overhang
-    rear: 1.10,    // rear overhang
-    width: 1.89,   // width without mirrors
-    rOuter: 5.85,  // outer turning radius: outermost body corner at full lock
-    track: 1.60,   // track width: used only to draw the wheels
-    ratio: 13      // steering ratio: steering wheel angle divided by road wheel angle
-  };
+  /* Vehicles that are ready to use. The data are in meters.
+   * track = track width, used only to draw the wheels.
+   * ratio = steering ratio (steering wheel angle divided by road wheel angle). */
+  Sim.PRESETS = [
+    { name: 'PKW', wb: 2.86, front: 0.92, rear: 1.10, width: 1.89, rOuter: 5.85, track: 1.60, ratio: 13, preset: true },
+    { name: 'LKW', wb: 5.17, front: 1.36, rear: 2.69, width: 2.30, rOuter: 9.46, track: 1.90, ratio: 20, preset: true }
+  ];
+  Sim.DEFAULT_VEHICLE = Object.assign({}, Sim.PRESETS[0]);
 
   /* Find the maximum steering angle from the turning circle.
    * At full lock, the outer front corner is on the circle of radius rOuter.
@@ -170,8 +168,9 @@
    *          (leg = index of the line, need and have in meters), or
    *          { kind: 'steer', maxD } the steering angle is more than the limit,
    *   arcs = for each corner point: { R, t, delta } or null if there is no arc.
-   * The samples are also made when the route cannot be driven, so that the vehicle is always shown. */
-  Sim.buildRoute = function (pts, v, o) {
+   * The samples are also made when the route cannot be driven, so that the vehicle is always shown.
+   * With opt.checkOnly, only the length check is done and the result has only fail. */
+  Sim.buildRoute = function (pts, v, o, opt) {
     const P = [];
     for (const p of pts) if (!P.length || hyp(p.x - P[P.length - 1].x, p.y - P[P.length - 1].y) > 1e-6) P.push(p);
     if (P.length < 2) return { smp: [Sim.startState(v, P[0], 0)], fail: null, arcs: [] };
@@ -195,6 +194,7 @@
       const need = tMinAt(j) + tMinAt(j + 1);
       if (len[j] + 1e-6 < need) fail = { kind: 'length', leg: j, need: need, have: len[j] };
     }
+    if (opt && opt.checkOnly) return { fail: fail };
     // Free length of the lines goes to the arcs, so that the radii are as large as possible.
     const arcs = [null];
     for (let j = 1; j < n; j++) {
@@ -233,6 +233,42 @@
     for (const q of smp) maxD = Math.max(maxD, Math.abs(q.d));
     if (!fail && maxD > o.dMax + 0.01) fail = { kind: 'steer', maxD: maxD };
     return { smp: smp, fail: fail, arcs: arcs };
+  };
+
+  /* Limit a new corner point M, so that the route is always one that the vehicle can drive.
+   * P = the points of the route that exists (in meters). The last point of P is the corner
+   * where the vehicle turns toward M. The turn at that point needs a minimum length on the
+   * line before it. This length limits the angle of the turn. The line after the turn needs
+   * a minimum length too. If M is not possible, it is moved to the nearest point that is possible:
+   * the direction is turned toward the straight line, and the distance is made longer.
+   * Return { pt, clamped, run }: the new point, a flag, and the route that Sim.buildRoute makes for it. */
+  Sim.limitTarget = function (P, M, v, o) {
+    const run0 = (pt) => Sim.buildRoute(P.concat([pt]), v, o);
+    if (P.length < 2) return { pt: M, clamped: false, run: run0(M) };
+    const V = P[P.length - 1], U = P[P.length - 2];
+    const thIn = Math.atan2(V.y - U.y, V.x - U.x), lenIn = hyp(V.x - U.x, V.y - U.y);
+    let free = lenIn;                                  // free length of the line before V
+    if (P.length >= 3) {
+      const W = P[P.length - 3], dlU = normAngle(thIn - Math.atan2(U.y - W.y, U.x - W.x));
+      if (Math.PI - Math.abs(dlU) < 0.02) free = -Infinity;
+      else if (Math.abs(dlU) >= 1e-3) free -= o.rFront * Math.tan(Math.abs(dlU) / 2);
+    }
+    const dist = hyp(M.x - V.x, M.y - V.y);
+    let dl = dist < 1e-6 ? 0 : normAngle(Math.atan2(M.y - V.y, M.x - V.x) - thIn);
+    const dlMax = free > 0 ? Math.min(2 * Math.atan(free / o.rFront), Math.PI - 0.03) : 0;
+    let clamped = false;
+    if (Math.abs(dl) > dlMax) { dl = (dl < 0 ? -1 : 1) * dlMax; clamped = true; }
+    let run, pt;
+    for (let k = 0; k < 60; k++) {
+      const need = Math.abs(dl) >= 1e-3 ? o.rFront * Math.tan(Math.abs(dl) / 2) * 1.0001 + 1e-4 : 0;
+      let d2 = dist;
+      if (d2 < need) { d2 = need; clamped = true; }
+      pt = { x: V.x + d2 * Math.cos(thIn + dl), y: V.y + d2 * Math.sin(thIn + dl) };
+      run = run0(pt);
+      if (!run.fail || Math.abs(dl) < 1e-3) break;
+      dl *= 0.93; clamped = true;                      // for example, the steering would be more than the limit
+    }
+    return { pt: pt, clamped: clamped, run: run };
   };
 
   Sim.local = function (smp, x, y) {
@@ -350,6 +386,25 @@
     for (const q of small.smp) if (q.th > 0.5) for (const k of Sim.bodyPoly(q, v)) outer = Math.max(outer, hyp(k.x - 0, k.y - (o.rFront + 0.001)));
     add('Fahrweise 1: kleinste Kurve hat den Mindestradius ' + o.rFront.toFixed(2) + ' m', Math.abs(minRG - o.rFront) < 0.02, 'gemessen ' + minRG.toFixed(2) + ' m');
     add('Fahrweise 1: Karosserie bleibt innerhalb des Wendekreises ' + v.rOuter + ' m', outer <= v.rOuter + 0.02 && outer > 5, 'größter Abstand ' + outer.toFixed(2) + ' m');
+    // Limited targets: every point that the user can set gives a route that the vehicle can drive.
+    // Test with both vehicles and many points around a route with two lines.
+    let badLimit = 0, clampedN = 0, total = 0, seed = 7;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    for (const veh2 of Sim.PRESETS) {
+      const o2 = Sim.driveOpts(veh2), base = [pt(0, 0), pt(40, 0), pt(60, 25)];
+      for (let k = 0; k < 150; k++) {
+        const r = Sim.limitTarget(base, pt(rnd() * 200 - 60, rnd() * 200 - 100), veh2, o2);
+        total++; if (r.clamped) clampedN++;
+        if (r.run.fail) badLimit++;
+      }
+    }
+    add('Zielpunkt-Begrenzung: jeder Punkt ergibt eine fahrbare Route', badLimit === 0, total + ' Punkte, davon ' + clampedN + ' begrenzt, ' + badLimit + ' nicht fahrbar');
+    const lkw = Sim.PRESETS[1], oL = Sim.driveOpts(lkw), limL = Sim.steerLimit(lkw);
+    add('LKW: Wendekreis passt zu den Maßen', !!limL, limL ? 'δmax = ' + (limL.delta * 180 / Math.PI).toFixed(1) + '°, R Vorderachse = ' + limL.rFront.toFixed(2) + ' m' : '');
+    const lkwRoute = Sim.buildRoute([pt(0, 0), pt(40, 0), pt(40, 40)], lkw, oL);
+    let lD = 0;
+    lkwRoute.smp.forEach((q) => { lD = Math.max(lD, Math.abs(q.d)); });
+    add('LKW: 90°-Ecke fahrbar, Lenkwinkel im Limit', !lkwRoute.fail && lD <= oL.dMax + 0.01, (lD * 180 / Math.PI).toFixed(1) + '°');
     return res;
   };
 

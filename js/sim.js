@@ -17,12 +17,20 @@
    * track = track width. The program uses it only to draw the wheels.
    * gap = distance between the two rear axles. The program uses it only to draw the axles. 0 = one rear axle.
    * trail = true when the rearmost axle is steered (trailing steered axle). The program uses it only to draw the wheels.
+   * artic = true for an articulated vehicle (a bus with a joint). Then hitch, axle2, rearOver and knickGon are used:
+   * hitch = distance from the middle axle to the joint, axle2 = distance from the joint to the rear axle,
+   * rearOver = overhang behind the rear axle, knickGon = largest articulation angle in gon.
    * ratio = steering ratio. It is the steering wheel angle divided by the road wheel angle. */
   Sim.PRESETS = [
     { name: 'PKW', wb: 2.86, front: 0.92, rear: 1.10, width: 1.89, rOuter: 5.85, track: 1.60, ratio: 13, gap: 0, trail: false, preset: true },
     { name: 'LKW', wb: 5.17, front: 1.36, rear: 2.69, width: 2.30, rOuter: 9.46, track: 1.90, ratio: 20, gap: 0, trail: false, preset: true },
     { name: 'Müllfahrzeug 3-achsig', wb: 4.77, front: 1.53, rear: 3.60, width: 2.55, rOuter: 10.25, track: 2.00, ratio: 20, gap: 1.35, trail: false, preset: true },
-    { name: 'Müllfahrzeug 3-achsig Nachlaufachse', wb: 3.90, front: 1.35, rear: 4.70, width: 2.55, rOuter: 8.60, track: 2.00, ratio: 20, gap: 1.35, trail: true, preset: true }
+    { name: 'Müllfahrzeug 3-achsig Nachlaufachse', wb: 3.90, front: 1.35, rear: 4.70, width: 2.55, rOuter: 8.60, track: 2.00, ratio: 20, gap: 1.35, trail: true, preset: true },
+    // An articulated bus with three axles (the dimensions of the drawing): the front axle, the middle axle and the rear axle.
+    // The middle axle is the rear axle of the model. rear = hitch + axle2 + rearOver is the distance from the middle axle to the end.
+    // knickGon = the largest articulation angle. The value is not from the maker. It is a little more than the angle that the turning circle needs.
+    { name: 'Gelenkbus 3-achsig (18 m)', wb: 5.90, front: 2.70, rear: 9.40, width: 2.55, rOuter: 11.40, track: 2.10, ratio: 20, gap: 0, trail: false,
+      artic: true, hitch: 1.79, axle2: 4.21, rearOver: 3.40, knickGon: 65, preset: true }
   ];
   Sim.DEFAULT_VEHICLE = Object.assign({}, Sim.PRESETS[0]);
 
@@ -98,11 +106,29 @@
     return a;
   }
 
+  /* One step of a rigid link of the length L. The point F moves to the new position (Fx, Fy).
+   * The point P (px, py) with the direction pth follows. P moves along its own direction, and the distance
+   * to F stays equal to L. This is the rear axle of a car, or the rear axle of the rear body of a bus.
+   * The function moves P along the mean direction (second order). Return the new { x, y, th }. */
+  Sim.pursue = function (px, py, pth, Fx, Fy, L) {
+    const wx = Fx - px, wy = Fy - py;
+    let thN = Math.atan2(wy, wx), nx = px, ny = py;
+    for (let it = 0; it < 3; it++) {
+      const am = pth + normAngle(thN - pth) / 2, ux = Math.cos(am), uy = Math.sin(am);
+      const wu = wx * ux + wy * uy, disc = wu * wu - (wx * wx + wy * wy) + L * L;
+      const t = wu - Math.sqrt(Math.max(0, disc));
+      nx = px + t * ux; ny = py + t * uy;
+      thN = Math.atan2(Fy - ny, Fx - nx);
+    }
+    return { x: nx, y: ny, th: thN };
+  };
+
   /* The center of the front axle follows the path.
    * The rear axle follows, because the wheelbase is rigid.
    * Each result has these values:
    * s = distance along the path, F = front axle, R = rear axle,
-   * th = vehicle angle, d = steering angle (path tangent minus vehicle angle). */
+   * th = vehicle angle, d = steering angle (path tangent minus vehicle angle).
+   * An articulated vehicle (v.artic) has more values, see Sim.addRearBody. */
   Sim.run = function (path, v) {
     const n = path.length;
     if (n < 2) return null;
@@ -119,18 +145,9 @@
         th = tan[0];
       } else {
         s += hyp(F.x - path[i - 1].x, F.y - path[i - 1].y);
-        // The rear axle moves along the mean vehicle angle (second order).
-        // The distance |F - R| stays equal to the wheelbase.
-        const wx = F.x - Rx, wy = F.y - Ry, th0 = th;
-        let thN = Math.atan2(wy, wx), nx = Rx, ny = Ry;
-        for (let it = 0; it < 3; it++) {
-          const am = th0 + normAngle(thN - th0) / 2, ux = Math.cos(am), uy = Math.sin(am);
-          const wu = wx * ux + wy * uy, disc = wu * wu - (wx * wx + wy * wy) + v.wb * v.wb;
-          const t = wu - Math.sqrt(Math.max(0, disc));
-          nx = Rx + t * ux; ny = Ry + t * uy;
-          thN = Math.atan2(F.y - ny, F.x - nx);
-        }
-        th = thN; Rx = nx; Ry = ny;
+        // The rear axle follows the front axle. The distance |F - R| stays equal to the wheelbase.
+        const r = Sim.pursue(Rx, Ry, th, F.x, F.y, v.wb);
+        th = r.th; Rx = r.x; Ry = r.y;
         out.push({ s: s, Fx: F.x, Fy: F.y, Rx: Rx, Ry: Ry, th: th, d: normAngle(tan[i] - th) });
         continue;
       }
@@ -138,7 +155,29 @@
       Ry = F.y - v.wb * Math.sin(th);
       out.push({ s: s, Fx: F.x, Fy: F.y, Rx: Rx, Ry: Ry, th: th, d: normAngle(tan[i] - th) });
     }
+    if (v.artic) Sim.addRearBody(out, v);
     return out;
+  };
+
+  /* Add the rear body of an articulated vehicle (a bus with a joint) to the samples.
+   * The front body has the front axle and the middle axle. The middle axle is the "rear axle" of the model.
+   * The joint (hitch) H is on the axis of the front body, at the distance v.hitch behind the middle axle.
+   * The rear axle T of the rear body is at the distance v.axle2 behind the joint.
+   * The rear axle follows the joint like the rear axle of a car follows the front axle (tractrix).
+   * New values in each sample: Hx, Hy = joint, Tx, Ty = rear axle, th2 = direction of the rear body,
+   * phi = articulation angle (th minus th2). */
+  Sim.addRearBody = function (smp, v) {
+    let tx = 0, ty = 0, th2 = 0;
+    smp.forEach((q, i) => {
+      const hx = q.Rx - v.hitch * Math.cos(q.th), hy = q.Ry - v.hitch * Math.sin(q.th);
+      if (i === 0) {          // At the start, the rear body is straight behind the front body.
+        th2 = q.th; tx = hx - v.axle2 * Math.cos(th2); ty = hy - v.axle2 * Math.sin(th2);
+      } else {
+        const r = Sim.pursue(tx, ty, th2, hx, hy, v.axle2);
+        tx = r.x; ty = r.y; th2 = r.th;
+      }
+      q.Hx = hx; q.Hy = hy; q.Tx = tx; q.Ty = ty; q.th2 = th2; q.phi = normAngle(q.th - th2);
+    });
   };
 
   Sim.sample = function (v, Rx, Ry, th, d, s) {
@@ -201,6 +240,7 @@
    *             The value leg is the index of the line. The values need and have are lengths in meters.
    *             { kind: 'radius', R, rMin } = an arc is smaller than the minimum turning circle.
    *             { kind: 'steer', maxD } = the steering angle is more than the limit.
+   *             { kind: 'knick', maxPhi, limit } = the articulation angle is more than the limit (articulated vehicle).
    *   lastArc = { R, delta } if the last part is an arc through a point. The value delta is the turn in radians.
    *             Otherwise it is null.
    *   arcs    = the arcs at the corner points between two lines.
@@ -340,6 +380,12 @@
     let maxD = 0;
     for (const q of smp) maxD = Math.max(maxD, Math.abs(q.d));
     if (!fail && maxD > o.dMax + 0.01) fail = { kind: 'steer', maxD: maxD };
+    if (v.artic && !fail) {            // The articulation angle must not be more than the limit.
+      let maxPhi = 0;
+      for (const q of smp) maxPhi = Math.max(maxPhi, Math.abs(q.phi));
+      const limitPhi = v.knickGon * Math.PI / 200;
+      if (maxPhi > limitPhi + 0.01) fail = { kind: 'knick', maxPhi: maxPhi, limit: limitPhi };
+    }
     return { smp: smp, fail: fail, lastArc: lastArc, arcs: arcs, ends: ends, end: pose };
   };
 
@@ -437,8 +483,39 @@
 
   /* Body polygon. Corner order: front left, front right, rear right, rear left. */
   Sim.bodyPoly = function (smp, v) {
-    const hw = v.width / 2, xf = v.wb + v.front, xr = -v.rear;
+    // An articulated vehicle: this is the front body. It ends at the joint.
+    const hw = v.width / 2, xf = v.wb + v.front, xr = v.artic ? -v.hitch : -v.rear;
     return [Sim.local(smp, xf, -hw), Sim.local(smp, xf, hw), Sim.local(smp, xr, hw), Sim.local(smp, xr, -hw)];
+  };
+
+  /* All polygons of the vehicle. A normal vehicle has one polygon.
+   * An articulated vehicle has three: the front body, the bellows of the joint, and the rear body.
+   * All polygons have the same direction of the corners, so that the union can be drawn with one fill. */
+  Sim.bodyPolys = function (smp, v) {
+    const front = Sim.bodyPoly(smp, v);
+    if (!v.artic) return [front];
+    const hw = v.width / 2, c = Math.cos(smp.th2), sn = Math.sin(smp.th2);
+    const loc2 = (x, y) => ({ x: smp.Tx + x * c - y * sn, y: smp.Ty + x * sn + y * c });      // The frame of the rear body.
+    const rear = [loc2(v.axle2, -hw), loc2(v.axle2, hw), loc2(-v.rearOver, hw), loc2(-v.rearOver, -hw)];
+    const bellows = [Sim.local(smp, -v.hitch, -hw), Sim.local(smp, -v.hitch, hw), loc2(v.axle2, hw), loc2(v.axle2, -hw)];
+    return [front, bellows, rear];
+  };
+
+  /* The four corners that make the outer lines (envelope) of the swept path:
+   * front left, front right, rear right, rear left. For an articulated vehicle, the rear corners are on the rear body. */
+  Sim.trailPoints = function (smp, v) {
+    const p = Sim.bodyPolys(smp, v);
+    return v.artic ? [p[0][0], p[0][1], p[2][2], p[2][3]] : p[0];
+  };
+
+  /* The articulation angle in a steady turn at full lock (radians). It is the angle that the vehicle needs
+   * for the turning circle. Return null if the data are not valid. */
+  Sim.articSteady = function (v) {
+    const lim = Sim.steerLimit(v);
+    if (!v.artic || !lim) return null;
+    const rh = hyp(lim.rRear, v.hitch);
+    if (v.axle2 >= rh) return null;
+    return Math.atan(v.hitch / lim.rRear) + Math.asin(v.axle2 / rh);
   };
 
   /* Calculate the scale (meters per unit u). The inputs are a polyline in unit u and its real length in meters. */
@@ -594,6 +671,29 @@
     // More than 200 gon. The point is behind the vehicle and to the side.
     const loop = Sim.buildRoute([pt(0, 0), pt(20, 0), arcPt(10, 12)], v, o);
     add('Wende: mehr als 200 gon in einem Zug', !loop.fail && loop.lastArc && Math.abs(loop.lastArc.delta) > Math.PI, loop.lastArc ? 'Drehung ' + Sim.gon(loop.lastArc.delta).toFixed(1) + ' gon' : '');
+
+    // The articulated bus: the rear body follows the joint. The distance joint to rear axle is always the same.
+    // In a long turn at full lock, the articulation angle and the radius of the rear axle are the values that the geometry gives.
+    const bus = Sim.PRESETS.find((b) => b.artic), ob = Sim.driveOpts(bus), limB = Sim.steerLimit(bus);
+    const busStraight = Sim.buildRoute([pt(0, 0), pt(40, 0)], bus, ob);
+    add('Gelenkbus: Geradeausfahrt, Knickwinkel 0', !busStraight.fail && busStraight.smp.every((q) => Math.abs(q.phi) < 1e-9), '');
+    const busTurn = Sim.makeTurn([pt(0, 0), pt(40, 0)], 1, 1.9 * Math.PI, 0, bus, ob);
+    let hingeErr = 0, phiSim = 0, rA3 = 0;
+    busTurn.run.smp.forEach((q, i) => {
+      hingeErr = Math.max(hingeErr, Math.abs(hyp(q.Hx - q.Tx, q.Hy - q.Ty) - bus.axle2));
+      if (i > busTurn.run.smp.length * 0.7) { phiSim = Math.max(phiSim, Math.abs(q.phi)); rA3 = hyp(q.Tx - 40, q.Ty - limB.rFront); }
+    });
+    const rH = hyp(limB.rRear, bus.hitch), rA3Analytic = Math.sqrt(rH * rH - bus.axle2 * bus.axle2);
+    add('Gelenkbus: Abstand Gelenk–Hinterachse bleibt konstant', hingeErr < 1e-9, 'Abweichung ' + hingeErr.toExponential(1) + ' m');
+    add('Gelenkbus: Knickwinkel bei vollem Einschlag = Geometrie (' + Sim.gon(Sim.articSteady(bus)).toFixed(1) + ' gon)',
+      Math.abs(phiSim - Sim.articSteady(bus)) < Math.PI / 200 * 1.5, 'Simulation ' + Sim.gon(phiSim).toFixed(1) + ' gon');
+    add('Gelenkbus: Radius der Hinterachse = Geometrie (' + rA3Analytic.toFixed(2) + ' m)', Math.abs(rA3 - rA3Analytic) < 0.1, 'Simulation ' + rA3.toFixed(2) + ' m');
+    add('Gelenkbus: der Grenzwert für den Knickwinkel reicht für den Wendekreis', bus.knickGon * Math.PI / 200 >= Sim.articSteady(bus),
+      'Grenze ' + bus.knickGon + ' gon, nötig ' + Sim.gon(Sim.articSteady(bus)).toFixed(1) + ' gon');
+    const busLow = Object.assign({}, bus, { knickGon: 45 });          // 45 gon is too small for the turning circle.
+    const busLowRun = Sim.buildRoute([pt(0, 0), pt(40, 0), busTurn.el], busLow, Sim.driveOpts(busLow));
+    add('Gelenkbus: ein zu kleiner Knickwinkel-Grenzwert wird erkannt', !!busLowRun.fail && busLowRun.fail.kind === 'knick',
+      busLowRun.fail && busLowRun.fail.maxPhi ? Sim.gon(busLowRun.fail.maxPhi).toFixed(1) + ' gon > ' + busLow.knickGon + ' gon' : '');
 
     // Turn by angle (the turn template of the RBSV, the corner path of AutoTURN).
     // A turn with 200 gon is a turn around in one movement. The radius is the minimum turning circle.

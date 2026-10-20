@@ -29,7 +29,8 @@
 
   /* ---------- vehicles ---------- */
   const STORE = 'schleppkurve.vehicles.v1';
-  const FIELDS = { v_wb: 'wb', v_front: 'front', v_rear: 'rear', v_width: 'width', v_rout: 'rOuter', v_track: 'track', v_ratio: 'ratio', v_gap: 'gap' };
+  const FIELDS = { v_wb: 'wb', v_front: 'front', v_rear: 'rear', v_width: 'width', v_rout: 'rOuter', v_track: 'track', v_ratio: 'ratio', v_gap: 'gap',
+                   v_hitch: 'hitch', v_axle2: 'axle2', v_rearOver: 'rearOver', v_knick: 'knickGon' };
   let vehicles = Sim.PRESETS.map((v) => Object.assign({}, v)), selIdx = 0;
   try {      // The browser can block the storage. The page also works without it.
     const saved = JSON.parse(localStorage.getItem(STORE));
@@ -220,11 +221,13 @@
   function failShort(fl) {
     if (fl.kind === 'steer') return 'Lenkwinkel zu groß';
     if (fl.kind === 'radius') return 'Bogen zu eng';
+    if (fl.kind === 'knick') return 'Knickwinkel zu groß';
     return 'Strecke ' + (fl.leg + 1) + ' zu kurz';
   }
 
   function failText(fl) {
     if (fl.kind === 'steer') return 'Der Lenkwinkel wäre ' + f(gon(fl.maxD), 1) + ' gon und damit über dem Limit.';
+    if (fl.kind === 'knick') return 'Der Knickwinkel wäre ' + f(gon(fl.maxPhi), 1) + ' gon und damit über dem Grenzwert von ' + f(gon(fl.limit), 1) + ' gon.';
     if (fl.kind === 'radius') return 'Der Bogen wäre enger als der Wendekreis' + (isFinite(fl.R) ? ' (R = ' + f(fl.R, 1) + ' m, kleinster Radius ' + f(fl.rMin, 1) + ' m).' : '.');
     return isFinite(fl.need)
       ? 'Strecke ' + (fl.leg + 1) + ' ist zu kurz für die Kurven an ihren Enden: nötig ' + f(fl.need, 1) + ' m, vorhanden ' + f(fl.have, 1) + ' m. Für eine Wende „Kurve nach Winkel“ (K oder W) nutzen.'
@@ -236,16 +239,17 @@
     v = v || veh;
     const A = { smp: smp, sweep: new Path2D(), sat: new Path2D(), front: new Path2D(),
                 rear: new Path2D(), trails: new Path2D(), sil: new Path2D(),
-                maxD: 0, satLen: 0, turn: 0, length: smp[smp.length - 1].s };
+                maxD: 0, maxPhi: 0, satLen: 0, turn: 0, length: smp[smp.length - 1].s };
     const trail = [[], [], [], []];
     const silStep = Math.max(0.5, parseFloat($('silStep').value) || 2);
     let nextSil = 0;
     smp.forEach((p, i) => {
-      const poly = Sim.bodyPoly(p, v);
-      poly.forEach((c, k) => trail[k].push(c));
-      if (i % 2 === 0 || i === smp.length - 1) addPoly(A.sweep, poly);
-      if (p.s >= nextSil) { addPoly(A.sil, poly); nextSil += silStep; }
+      const polys = Sim.bodyPolys(p, v);                    // An articulated vehicle has three polygons.
+      Sim.trailPoints(p, v).forEach((c, k) => trail[k].push(c));
+      if (i % 2 === 0 || i === smp.length - 1) polys.forEach((poly) => addPoly(A.sweep, poly));
+      if (p.s >= nextSil) { polys.forEach((poly) => addPoly(A.sil, poly)); nextSil += silStep; }
       A.maxD = Math.max(A.maxD, Math.abs(p.d));
+      if (v.artic) A.maxPhi = Math.max(A.maxPhi, Math.abs(p.phi));
       if (i > 0) A.turn += Math.atan2(Math.sin(p.th - smp[i - 1].th), Math.cos(p.th - smp[i - 1].th));    // The change of direction.
       if (i > 0 && Math.abs(p.d) >= lim.delta - 0.0087) {
         A.satLen += p.s - smp[i - 1].s;
@@ -272,10 +276,20 @@
   const f = (x, d) => x.toFixed(d).replace('.', ',');
   const gon = Sim.gon;        // All angles in the user interface are in gon. 400 gon is a full circle.
 
+  /* The articulation angle that the turning circle needs, compared with the limit of the vehicle. */
+  function articInfo() {
+    if (!veh.artic) return '';
+    const st = Sim.articSteady(veh);
+    if (st == null) return ' · <span class="bad">Gelenkmaße passen nicht</span>';
+    const ok = veh.knickGon * Math.PI / 200 >= st;
+    return ' · Knickwinkel im Wendekreis ' + f(gon(st), 1) + ' gon, Grenzwert ' + f(veh.knickGon, 1) + ' gon' +
+      (ok ? '' : ' <span class="bad">(zu klein für den Wendekreis)</span>');
+  }
+
   function updateInfo() {
     const lim = Sim.steerLimit(veh);
     $('vInfo').innerHTML = 'Länge gesamt ' + f(veh.front + veh.wb + veh.rear, 2) + ' m · ' + (lim
-      ? 'max. Lenkwinkel ' + f(gon(lim.delta), 1) + ' gon · Radius Hinterachse ' + f(lim.rRear, 2) + ' m'
+      ? 'max. Lenkwinkel ' + f(gon(lim.delta), 1) + ' gon · Radius Hinterachse ' + f(lim.rRear, 2) + ' m' + articInfo()
       : '<span class="bad">Wendekreis passt nicht zu den Maßen</span>');
     if (S.mpp) {
       const ratio = 1000 * S.mpp / 0.352778;   // The paper scale 1:x, if the PDF page has the true size.
@@ -293,10 +307,11 @@
       rows.push(['Max. Lenkwinkel', f(gon(R.maxD), 1) + ' gon von ' + f(gon(R.lim.delta), 1) + ' gon']);
       rows.push(['Lenkrad max.', f(gon(R.maxD) * veh.ratio, 0) + ' gon von ' + f(gon(R.lim.delta) * veh.ratio, 0) + ' gon']);
       rows.push(['Lenkung am Anschlag', R.satLen > 0.01 ? '<span class="warn">' + f(R.satLen, 1) + ' m</span>' : 'nein']);
+      if (veh.artic) rows.push(['Knickwinkel max.', f(gon(R.maxPhi), 1) + ' gon von ' + f(veh.knickGon, 1) + ' gon']);
       if (R.fail) rows.push(['Leitlinie', '<span class="bad">' + failShort(R.fail) + '</span>']);
       if (S.valid < S.wps.length) rows.push(['Ungültige Punkte', '<span class="bad">ab Punkt ' + (S.valid + 1) + ' (Strecke zu kurz)</span>']);
       const q = R.smp[sampleIndex()];
-      rows.push(['Position ' + f(q.s, 1) + ' m', 'Lenkwinkel ' + f(gon(q.d), 1) + ' gon']);
+      rows.push(['Position ' + f(q.s, 1) + ' m', 'Lenkwinkel ' + f(gon(q.d), 1) + ' gon' + (veh.artic ? ', Knick ' + f(gon(q.phi), 1) + ' gon' : '')]);
     }
     if (P) {
       rows.push(['Vorschau', !P.ok ? '<span class="bad">' + failShort(P.fail) + '</span>'
@@ -304,6 +319,7 @@
       rows.push(['Vorschau: Richtungsänderung', f(Math.abs(gon(P.turn)), 1) + ' gon']);
       if (P.lastArc) rows.push(['Vorschau: Bogen', 'R = ' + f(P.lastArc.R, 1) + ' m · ' + f(Math.abs(gon(P.lastArc.delta)), 1) + ' gon']);
       rows.push(['Vorschau: Lenkwinkel max.', f(gon(P.maxD), 1) + ' gon (Lenkrad ' + f(gon(P.maxD) * veh.ratio, 0) + ' gon)']);
+      if (veh.artic) rows.push(['Vorschau: Knickwinkel max.', f(gon(P.maxPhi), 1) + ' gon von ' + f(veh.knickGon, 1) + ' gon']);
     }
     $('res').innerHTML = rows.map((r) => '<span>' + r[0] + '</span><b>' + r[1] + '</b>').join('');
     $('posInfo').textContent = R ? f(R.smp[sampleIndex()].s, 1) + ' / ' + f(R.length, 1) + ' m' : '';
@@ -403,14 +419,24 @@
     const wl = v.width > 2.2 ? 1.0 : 0.65, ww = v.width > 2.2 ? 0.30 : 0.22;       // A truck has larger wheels.
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.translate(p.Rx, p.Ry); ctx.rotate(p.th);
     ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.strokeStyle = color; ctx.lineWidth = 1.5 * um;
-    ctx.fillRect(-v.rear, -hw, L, v.width); ctx.strokeRect(-v.rear, -hw, L, v.width);
+    if (v.artic) {
+      // The front body, the bellows (dark) and the rear body. The polygons are in the plan frame.
+      Sim.bodyPolys(p, v).forEach((poly, i) => {
+        ctx.beginPath();
+        poly.forEach((c, k) => (k ? ctx.lineTo(c.x, c.y) : ctx.moveTo(c.x, c.y)));
+        ctx.closePath();
+        ctx.fillStyle = i === 1 ? 'rgba(70,70,70,.55)' : 'rgba(255,255,255,.75)';
+        ctx.fill(); ctx.stroke();
+      });
+    }
+    ctx.translate(p.Rx, p.Ry); ctx.rotate(p.th);
+    if (!v.artic) { ctx.fillRect(-v.rear, -hw, L, v.width); ctx.strokeRect(-v.rear, -hw, L, v.width); }
     ctx.fillStyle = '#222';
     const wheel = (x, y, a) => {
       ctx.save(); ctx.translate(x, y); ctx.rotate(a); ctx.fillRect(-wl / 2, -ww / 2, wl, ww); ctx.restore();
     };
-    const t = v.track / 2, g = v.gap > 0 ? v.gap / 2 : 0;
+    const t = v.track / 2, g = v.gap > 0 && !v.artic ? v.gap / 2 : 0;
     const rear = g > 0 ? [-g, g] : [0];                                          // The x positions of the rear axles.
     const trailAngle = v.trail && g > 0 ? -Math.atan(g * Math.tan(p.d) / v.wb) : 0;
     rear.forEach((x) => {
@@ -423,8 +449,21 @@
     rear.concat([v.wb]).forEach((x) => { ctx.moveTo(x, -t); ctx.lineTo(x, t); });
     const xf = v.wb + v.front;
     ctx.moveTo(xf - 0.5, -0.25); ctx.lineTo(xf - 0.1, 0); ctx.lineTo(xf - 0.5, 0.25);
+    if (v.artic) {                                   // The joint is a circle.
+      ctx.moveTo(-v.hitch + 0.25, 0); ctx.arc(-v.hitch, 0, 0.25, 0, 7);
+    }
     ctx.stroke();
     ctx.restore();
+    if (v.artic) {                                   // The rear axle of the rear body, in the frame of the rear body.
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(p.Tx, p.Ty); ctx.rotate(p.th2);
+      ctx.fillStyle = '#222';
+      wheel(0, -t, 0); wheel(0, t, 0);
+      ctx.strokeStyle = color; ctx.lineWidth = um;
+      ctx.beginPath(); ctx.moveTo(0, -t); ctx.lineTo(0, t); ctx.stroke();
+      ctx.restore();
+    }
   }
 
   /* Draw the driving lines that are not active. They are weaker than the active line.
@@ -779,6 +818,9 @@
     $('v_name').value = veh.name;
     Object.keys(FIELDS).forEach((id) => { $(id).value = veh[FIELDS[id]] || 0; });
     $('v_trail').checked = !!veh.trail;
+    $('v_artic').checked = !!veh.artic;
+    $('articBox').style.display = veh.artic ? '' : 'none';
+    $('v_rear').disabled = !!veh.artic;           // For an articulated vehicle, the rear overhang is the sum of the three values.
   }
 
   /* Choose the vehicle for the active driving line. */
@@ -811,8 +853,24 @@
     $(id).addEventListener('input', () => {
       const v = parseFloat($(id).value);
       // The distance of the rear axles can be 0 (one rear axle). All other values must be more than 0.
-      if (v > 0 || (FIELDS[id] === 'gap' && v >= 0)) { veh[FIELDS[id]] = v; saveVehicles(); recompute(); }
+      if (v > 0 || (FIELDS[id] === 'gap' && v >= 0)) {
+        veh[FIELDS[id]] = v;
+        if (veh.artic && ['hitch', 'axle2', 'rearOver'].includes(FIELDS[id])) {
+          veh.rear = veh.hitch + veh.axle2 + veh.rearOver;           // The distance from the middle axle to the end.
+          $('v_rear').value = Math.round(veh.rear * 1000) / 1000;
+        }
+        saveVehicles(); recompute();
+      }
     });
+  });
+  // Switch a vehicle to an articulated vehicle (a bus with a joint), or back.
+  $('v_artic').addEventListener('change', () => {
+    veh.artic = $('v_artic').checked;
+    if (veh.artic) {
+      veh.hitch = veh.hitch || 1.8; veh.axle2 = veh.axle2 || 4.2; veh.rearOver = veh.rearOver || 3.4; veh.knickGon = veh.knickGon || 65;
+      veh.rear = veh.hitch + veh.axle2 + veh.rearOver;
+    }
+    refreshFields(); saveVehicles(); recompute();
   });
   $('v_trail').addEventListener('change', () => { veh.trail = $('v_trail').checked; saveVehicles(); requestDraw(); });
 

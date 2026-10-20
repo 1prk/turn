@@ -1,26 +1,26 @@
-/* User interface. Plan coordinates are in PDF points (pt), y points down.
- * The scale (mpp = meters per pt) converts plan coordinates to meters.
+/* User interface. Plan coordinates are in PDF points (pt). The y axis points down.
+ * The scale (mpp = meters per pt) changes plan coordinates into meters.
  * The user draws in plan coordinates. All calculations use meters. */
 (function () {
   'use strict';
   const $ = (id) => document.getElementById(id);
   const cv = $('cv'), ctx = cv.getContext('2d');
-  const SNAP_PX = 9;            // pick radius for start and target points [px]
+  const SNAP_PX = 9;            // The pick radius for the start point and the other points [px].
 
   const S = {
-    pageImg: null, pw: 1200, ph: 850,   // page image and page size [pt]
+    pageImg: null, pw: 1200, ph: 850,   // The page image and the page size [pt].
     hasPage: false,
-    mpp: null,                          // meters per pt
+    mpp: null,                          // Meters per pt.
     scalePts: [], scaleDone: false,
-    start: null,                        // start: { p: front axle center [pt] }
-    pend: null,                         // start point that waits for the direction click
-    wps: [],                            // points of the guide line [pt]: { x, y, t } with t = 'line' or 'arc'
-    prev: null,                         // live preview of the next move
+    start: null,                        // The start: { p: center of the front axle [pt] }.
+    pend: null,                         // The start point. It waits for the click of the direction.
+    wps: [],                            // The points of the guide line [pt]: { x, y, t }. The value t is 'line' or 'arc'.
+    prev: null,                         // The live preview of the next move.
     tool: 'scale',
-    zoom: 1, ox: 0, oy: 0,              // view: screen = plan * zoom + offset
+    zoom: 1, ox: 0, oy: 0,              // The view: screen = plan * zoom + offset.
     pos: 0, playing: false,
-    valid: 0,                           // number of points that the vehicle can drive
-    seg: 'line',                        // type of the next part: 'line' (straight, corner) or 'arc' (arc through the point)
+    valid: 0,                           // The number of points that the vehicle can drive.
+    seg: 'line',                        // The type of the next part: 'line' (straight line, corner) or 'arc' (arc through the point).
     mouse: null, res: null
   };
 
@@ -28,16 +28,16 @@
   const STORE = 'schleppkurve.vehicles.v1';
   const FIELDS = { v_wb: 'wb', v_front: 'front', v_rear: 'rear', v_width: 'width', v_rout: 'rOuter', v_track: 'track', v_ratio: 'ratio' };
   let vehicles = Sim.PRESETS.map((v) => Object.assign({}, v)), selIdx = 0;
-  try {      // the browser can block the storage: the page works without it
+  try {      // The browser can block the storage. The page also works without it.
     const saved = JSON.parse(localStorage.getItem(STORE));
     if (saved && Array.isArray(saved.list) && saved.list.length) {
       vehicles = saved.list.map((v) => Object.assign({}, Sim.PRESETS[0], v));
       selIdx = Math.min(Math.max(0, saved.sel | 0), vehicles.length - 1);
     }
-  } catch (err) { /* use the preset vehicles */ }
+  } catch (err) { /* Use the preset vehicles. */ }
   let veh = vehicles[selIdx];
   function saveVehicles() {
-    try { localStorage.setItem(STORE, JSON.stringify({ list: vehicles, sel: selIdx })); } catch (err) { /* no storage */ }
+    try { localStorage.setItem(STORE, JSON.stringify({ list: vehicles, sel: selIdx })); } catch (err) { /* There is no storage. */ }
   }
   let pdfDoc = null, spaceDown = false, drag = null, lastClick = { t: 0, x: 0, y: 0 };
 
@@ -75,7 +75,7 @@
   async function renderPage(n) {
     const page = await pdfDoc.getPage(n);
     const vp1 = page.getViewport({ scale: 1 });
-    // Limit the image size to protect the memory of the browser.
+    // Limit the size of the image. This protects the memory of the browser.
     const rs = Math.min(3, 8192 / Math.max(vp1.width, vp1.height), Math.sqrt(40e6 / (vp1.width * vp1.height)));
     const vp = page.getViewport({ scale: rs });
     const c = document.createElement('canvas');
@@ -103,7 +103,7 @@
   function loadBlank() {
     resetProject();
     pdfDoc = null; S.pageImg = null; S.pw = 2000; S.ph = 1400; S.hasPage = true;
-    S.mpp = 0.05;       // preset scale for tests: 20 pt = 1 m
+    S.mpp = 0.05;       // The preset scale for tests: 20 pt = 1 m.
     S.scaleDone = true;
     $('pageRow').style.display = 'none';
     $('empty').style.display = 'none';
@@ -130,7 +130,8 @@
     S.res = null; S.prev = null; S.valid = S.wps.length;
     const lim = Sim.steerLimit(veh), o = Sim.driveOpts(veh);
     if (S.mpp && S.start && lim) {
-      // Draw only the part of the route that the vehicle can drive. A point after a line that is too short is not valid.
+      // Draw only the part of the route that the vehicle can drive.
+      // A point after a line that is too short is not valid.
       const pts = routeM(null);
       for (let k = 2; k <= S.wps.length; k++) {
         const r = Sim.buildRoute(pts.slice(0, k + 1), veh, o, { checkOnly: true });
@@ -143,7 +144,7 @@
     updatePreview();
   }
 
-  /* Points of the guide line in meters, with the type of each point ('line' or 'arc').
+  /* The points of the guide line in meters, with the type of each point ('line' or 'arc').
    * extra = one more point (plan units) or null. */
   function routeM(extra) {
     const pts = [S.start.p].concat(S.wps, extra ? [extra] : []);
@@ -152,9 +153,9 @@
 
   function routeOk() { return !!S.res && !S.res.fail && S.valid === S.wps.length; }
 
-  /* Calculate the live preview: the guide line with the mouse as the next corner point.
-   * The mouse point is limited, so that the route can always be driven: the preview shows
-   * how far the vehicle can go. The vehicle is always shown. */
+  /* Calculate the live preview. The mouse is the next point of the guide line.
+   * The function limits the mouse point. The vehicle can always drive the route.
+   * The preview shows how far the vehicle can go. The user sees the vehicle at all times. */
   function updatePreview() {
     S.prev = null;
     const R = S.res;
@@ -185,7 +186,7 @@
       : 'Eine Umkehr um fast 200 gon ist mit einer Ecke nicht fahrbar. Für eine Wende den Bogen (B) nutzen.';
   }
 
-  /* Build drawing paths (in meters) and numbers for a list of samples. */
+  /* Make the drawing paths (in meters) and the numbers for a list of samples. */
   function analyse(smp, lim) {
     const A = { smp: smp, sweep: new Path2D(), sat: new Path2D(), front: new Path2D(),
                 rear: new Path2D(), trails: new Path2D(), sil: new Path2D(),
@@ -199,7 +200,7 @@
       if (i % 2 === 0 || i === smp.length - 1) addPoly(A.sweep, poly);
       if (p.s >= nextSil) { addPoly(A.sil, poly); nextSil += silStep; }
       A.maxD = Math.max(A.maxD, Math.abs(p.d));
-      if (i > 0) A.turn += Math.atan2(Math.sin(p.th - smp[i - 1].th), Math.cos(p.th - smp[i - 1].th));    // change of direction
+      if (i > 0) A.turn += Math.atan2(Math.sin(p.th - smp[i - 1].th), Math.cos(p.th - smp[i - 1].th));    // The change of direction.
       if (i > 0 && Math.abs(p.d) >= lim.delta - 0.0087) {
         A.satLen += p.s - smp[i - 1].s;
         A.sat.moveTo(smp[i - 1].Fx, smp[i - 1].Fy); A.sat.lineTo(p.Fx, p.Fy);
@@ -223,7 +224,7 @@
 
   /* ---------- information panel ---------- */
   const f = (x, d) => x.toFixed(d).replace('.', ',');
-  const gon = Sim.gon;        // all angles in the user interface are in gon (400 gon = a full circle)
+  const gon = Sim.gon;        // All angles in the user interface are in gon. 400 gon is a full circle.
 
   function updateInfo() {
     const lim = Sim.steerLimit(veh);
@@ -231,7 +232,7 @@
       ? 'max. Lenkwinkel ' + f(gon(lim.delta), 1) + ' gon · Radius Hinterachse ' + f(lim.rRear, 2) + ' m'
       : '<span class="bad">Wendekreis passt nicht zu den Maßen</span>');
     if (S.mpp) {
-      const ratio = 1000 * S.mpp / 0.352778;   // paper scale 1:x if the PDF page is true size
+      const ratio = 1000 * S.mpp / 0.352778;   // The paper scale 1:x, if the PDF page has the true size.
       $('scaleInfo').innerHTML = '1 m = ' + f(1 / S.mpp, 2) + ' pt · ca. 1:' + Math.round(ratio) + ' (bei Originalgröße)';
     } else {
       $('scaleInfo').textContent = S.tool === 'scale'
@@ -275,7 +276,7 @@
     ctx.fillRect(0, 0, cv.width, cv.height);
     if (!S.hasPage) return;
     ctx.setTransform(dpr * S.zoom, 0, 0, dpr * S.zoom, dpr * S.ox, dpr * S.oy);
-    const px = 1 / S.zoom;                        // one screen pixel in pt
+    const px = 1 / S.zoom;                        // One screen pixel in pt.
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, S.pw, S.ph);
     if (S.pageImg) { ctx.imageSmoothingQuality = 'high'; ctx.drawImage(S.pageImg, 0, 0, S.pw, S.ph); }
@@ -288,7 +289,7 @@
 
   function drawGrid(px) {
     if (!S.mpp) return;
-    const g = 1 / S.mpp;                          // one meter in pt
+    const g = 1 / S.mpp;                          // One meter in pt.
     ctx.lineWidth = px; ctx.strokeStyle = '#e3e6eb';
     ctx.beginPath();
     for (let x = 0; x <= S.pw; x += g) { ctx.moveTo(x, 0); ctx.lineTo(x, S.ph); }
@@ -312,7 +313,7 @@
     ctx.strokeStyle = '#f97316'; ctx.fillStyle = '#f97316'; ctx.lineWidth = 2.5 * px;
     strokePts(pts); ctx.stroke();
     S.scalePts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 4 * px, 0, 7); ctx.fill(); });
-    if (S.tool === 'scale' && !S.scaleDone && S.mouse) {      // cross at the mouse: find the points on the plan
+    if (S.tool === 'scale' && !S.scaleDone && S.mouse) {      // A cross at the mouse. It helps to find the points on the plan.
       ctx.lineWidth = px;
       ctx.beginPath();
       ctx.moveTo(S.mouse.x - 10 * px, S.mouse.y); ctx.lineTo(S.mouse.x + 10 * px, S.mouse.y);
@@ -329,17 +330,17 @@
   function drawResult(px) {
     const R = S.res, P = S.prev;
     if (!R && !P) return;
-    const k = 1 / S.mpp, um = px * S.mpp;        // meters -> pt, and one pixel in meters
+    const k = 1 / S.mpp, um = px * S.mpp;        // k changes meters to pt. um is one pixel in meters.
     ctx.save();
     ctx.scale(k, k);
-    // With a preview, the preview shows the whole route. Without it, the fixed route is shown.
+    // If there is a preview, it shows the whole route. If not, the fixed route is shown.
     const A = P || R, ok = P ? (P.ok && !P.clamped) : !R.fail;
     if ($('oSweep').checked) { ctx.fillStyle = ok ? (P ? 'rgba(22,163,74,.20)' : 'rgba(40,110,220,.22)') : 'rgba(217,70,20,.25)'; ctx.fill(A.sweep); }
     ctx.lineWidth = um; ctx.strokeStyle = ok ? (P ? 'rgba(21,128,61,.9)' : 'rgba(20,70,170,.9)') : 'rgba(194,65,12,.9)'; ctx.stroke(A.trails);
     if ($('oSil').checked) { ctx.strokeStyle = 'rgba(30,40,60,.5)'; ctx.stroke(A.sil); }
     ctx.strokeStyle = '#6b7280'; ctx.setLineDash([4 * um, 3 * um]); ctx.stroke(A.rear);
     ctx.strokeStyle = ok ? '#111' : '#c2410c'; ctx.lineWidth = 1.5 * um; ctx.setLineDash([]); ctx.stroke(A.front);
-    ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 4 * um; ctx.stroke(A.sat);   // steering at the stop
+    ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 4 * um; ctx.stroke(A.sat);   // The steering is at the stop.
     drawVehicle(P ? P.end : R.smp[sampleIndex()], um, P ? 0.75 : 1);
     ctx.restore();
   }
@@ -358,7 +359,7 @@
     const t = veh.track / 2;
     wheel(0, -t, 0); wheel(0, t, 0);
     wheel(veh.wb, -t, p.d); wheel(veh.wb, t, p.d);
-    ctx.strokeStyle = '#0b3d91'; ctx.lineWidth = um;     // axles and direction arrow
+    ctx.strokeStyle = '#0b3d91'; ctx.lineWidth = um;     // The axles and the arrow of the direction.
     ctx.beginPath(); ctx.moveTo(0, -t); ctx.lineTo(0, t); ctx.moveTo(veh.wb, -t); ctx.lineTo(veh.wb, t);
     const xf = veh.wb + veh.front;
     ctx.moveTo(xf - 0.5, -0.25); ctx.lineTo(xf - 0.1, 0); ctx.lineTo(xf - 0.5, 0.25);
@@ -366,23 +367,23 @@
     ctx.restore();
   }
 
-  /* Draw the start, the targets and the mouse marker (plan units). */
+  /* Draw the start, the points and the mouse marker (plan units). */
   function drawPoints(px) {
     const dot = (p, fill) => {
       ctx.beginPath();
-      if (p.t === 'arc') {      // a point of an arc is a diamond, a corner point of lines is a circle
+      if (p.t === 'arc') {      // A point of an arc is a diamond. A corner point of lines is a circle.
         ctx.moveTo(p.x, p.y - 7 * px); ctx.lineTo(p.x + 6 * px, p.y); ctx.lineTo(p.x, p.y + 7 * px); ctx.lineTo(p.x - 6 * px, p.y); ctx.closePath();
       } else ctx.arc(p.x, p.y, 5 * px, 0, 7);
       ctx.fillStyle = fill; ctx.fill(); ctx.lineWidth = 1.5 * px; ctx.strokeStyle = '#111'; ctx.stroke();
     };
-    if (S.start) {      // the straight lines of the guide line (the arcs are the black line itself)
+    if (S.start) {      // The straight lines of the guide line. The arcs are the black line.
       const pts = [S.start.p].concat(S.wps.slice(0, S.valid));
       if (S.prev) pts.push(S.prev.target);
       ctx.save(); ctx.setLineDash([6 * px, 5 * px]); ctx.lineWidth = px; ctx.strokeStyle = '#7c3aed';
       ctx.beginPath();
       for (let i = 1; i < pts.length; i++) if (pts[i].t !== 'arc') { ctx.moveTo(pts[i - 1].x, pts[i - 1].y); ctx.lineTo(pts[i].x, pts[i].y); }
       ctx.stroke();
-      if (S.valid < S.wps.length) {       // points that are not valid: grey line, red points
+      if (S.valid < S.wps.length) {       // Points that are not valid have a grey line and red marks.
         ctx.strokeStyle = '#9ca3af'; strokePts(S.wps.slice(Math.max(0, S.valid - 1))); ctx.stroke();
       }
       ctx.restore();
@@ -409,13 +410,13 @@
       }
     } else if (S.mouse) {
       const bad = S.prev && (!S.prev.ok || S.prev.clamped);
-      if (S.prev && S.prev.clamped) {      // the mouse point is not possible: show the limited point
+      if (S.prev && S.prev.clamped) {      // The mouse point is not possible. Show the limited point.
         ctx.save(); ctx.setLineDash([3 * px, 3 * px]); ctx.strokeStyle = '#c2410c'; ctx.lineWidth = px;
         ctx.beginPath(); ctx.moveTo(S.prev.target.x, S.prev.target.y); ctx.lineTo(S.mouse.x, S.mouse.y); ctx.stroke(); ctx.restore();
       }
       ctx.strokeStyle = bad ? '#c2410c' : '#15803d'; ctx.lineWidth = 2 * px;
       ctx.beginPath();
-      if (S.seg === 'arc') {       // arc mode: a diamond
+      if (S.seg === 'arc') {       // In arc mode, the marker is a diamond.
         ctx.moveTo(S.mouse.x, S.mouse.y - 9 * px); ctx.lineTo(S.mouse.x + 8 * px, S.mouse.y);
         ctx.lineTo(S.mouse.x, S.mouse.y + 9 * px); ctx.lineTo(S.mouse.x - 8 * px, S.mouse.y); ctx.closePath();
       } else ctx.arc(S.mouse.x, S.mouse.y, 7 * px, 0, 7);
@@ -441,9 +442,9 @@
     ctx.lineWidth = 4; ctx.beginPath();
     ctx.moveTo(-r, 0); ctx.lineTo(r, 0); ctx.moveTo(0, 0); ctx.lineTo(0, r);
     ctx.stroke();
-    ctx.fillStyle = '#d92d20'; ctx.fillRect(-3, -r - 4, 6, 9);       // top mark of the wheel
+    ctx.fillStyle = '#d92d20'; ctx.fillRect(-3, -r - 4, 6, 9);       // The mark at the top of the wheel.
     ctx.restore();
-    // Bar: steering angle compared with the limit.
+    // The bar compares the steering angle with the limit.
     const bx = cx - 52, bw = 104, by = cy + 52;
     ctx.fillStyle = '#e5e7eb'; ctx.fillRect(bx, by, bw, 6);
     ctx.fillStyle = Math.abs(q.d) >= lim - 0.0087 ? '#d97706' : '#1f6feb';
@@ -471,14 +472,14 @@
     updatePreview();
   }
 
-  /* Choose the type of the next part: 'line' (straight line, corner) or 'arc' (arc through the point). */
+  /* Set the type of the next part: 'line' (straight line, corner) or 'arc' (arc through the point). */
   function setSeg(t) {
     S.seg = t;
     document.querySelectorAll('[data-seg]').forEach((b) => b.classList.toggle('active', b.dataset.seg === t));
     if (S.tool !== 'drive') setTool('drive'); else updatePreview();
   }
 
-  /* Find the target under the mouse. Return -2 for the start and -1 for no hit. */
+  /* Find the point under the mouse. Return -2 for the start point and -1 if there is no point. */
   function hitWp(sp) {
     for (let i = S.wps.length - 1; i >= 0; i--) {
       const q = p2s(S.wps[i]);
@@ -490,7 +491,7 @@
 
   cv.addEventListener('contextmenu', (e) => e.preventDefault());
 
-  /* Remove corner point i (or the last one). Without corner points, the start is removed too. */
+  /* Remove the point i (or the last point). If no other point is left, remove the start point too. */
   function removeWp(i) {
     S.wps.splice(i == null ? S.wps.length - 1 : i, 1);
     if (!S.wps.length) S.start = null;
@@ -498,7 +499,7 @@
   }
 
   /* A click without movement sets a point. A drag of more than 4 px moves the plan.
-   * The middle button, the right button and the space key always move the plan. */
+   * The middle button and the space key always move the plan. */
   function clickAt(sp, p, button) {
     if (!S.hasPage) return;
     if (button === 2) {
@@ -515,17 +516,18 @@
       if (S.scaleDone) { S.scalePts = []; S.scaleDone = false; S.mpp = null; recompute(); }
       S.scalePts.push(p);
       requestDraw();
-      if (S.scalePts.length === 2) finishScale();     // two points are enough
+      if (S.scalePts.length === 2) finishScale();     // Two points are enough.
     } else if (S.tool === 'drive') {
       if (!S.mpp) { $('hint').textContent = 'Zuerst den Maßstab setzen.'; return; }
       if (!S.start) {
         if (!S.pend) S.pend = p;
         else if (Math.hypot(p.x - S.pend.x, p.y - S.pend.y) * S.zoom > 3) {
-          S.start = { p: S.pend }; S.wps = [{ x: p.x, y: p.y, t: 'line' }];       // the second click is the end of the first line
+          S.start = { p: S.pend }; S.wps = [{ x: p.x, y: p.y, t: 'line' }];       // The second click is the end of the first line.
           S.pend = null; S.pos = 1; $('pos').value = 1000; recompute();
         }
       } else if (S.prev && S.prev.ok) {
-        // The point of the preview is set. It is the mouse point or, if the mouse point is not possible, the limited point.
+        // Set the point of the preview. It is the mouse point.
+        // If the mouse point is not possible, it is the limited point.
         S.wps.push(S.prev.target); S.pos = 1; $('pos').value = 1000; recompute();
       } else {
         $('hint').textContent = S.prev ? failText(S.prev.fail) : 'Zuerst die ungültigen Punkte entfernen (Rückschritt).';
@@ -541,7 +543,7 @@
     const pan = { sx: sp.x, sy: sp.y, ox: S.ox, oy: S.oy };
     if (e.button === 1 || spaceDown) { drag = Object.assign({ type: 'pan' }, pan); return; }
     const i = S.tool === 'drive' && e.button === 0 ? hitWp(sp) : -1;
-    if (i !== -1) {      // move a point; if the route is then not possible, the point goes back
+    if (i !== -1) {      // Move a point. If the route is then not possible, the point goes back.
       drag = { type: i === -2 ? 'start' : 'wp', i: i, okBefore: routeOk(), orig: i === -2 ? S.start.p : S.wps[i] };
     }
     else drag = Object.assign({ type: 'maybe', button: e.button, p: p }, pan);
@@ -584,11 +586,11 @@
     e.preventDefault();
     const sp = evPos(e), p = s2p(sp.x, sp.y);
     S.zoom = Math.min(80, Math.max(0.02, S.zoom * Math.pow(1.0015, -e.deltaY)));
-    S.ox = sp.x - p.x * S.zoom; S.oy = sp.y - p.y * S.zoom;     // keep the point under the cursor fixed
+    S.ox = sp.x - p.x * S.zoom; S.oy = sp.y - p.y * S.zoom;     // The point under the cursor stays in the same position.
     requestDraw();
   }, { passive: false });
 
-  /* Keys. Space (hold) moves the plan. The other keys are in the list in the sidebar. */
+  /* Keys. The space key (hold) moves the plan. The list in the sidebar shows the other keys. */
   window.addEventListener('keydown', (e) => {
     if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
     if (e.code === 'Space') { spaceDown = true; if (e.target === document.body) e.preventDefault(); return; }
@@ -596,7 +598,7 @@
     if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); undoPoint(); return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (k === 'escape' || k === 'enter') {
-      // First step: remove what is not finished. Next step: end the tool.
+      // First, remove the unfinished work. Then end the tool.
       if (S.tool === 'drive' && S.pend) S.pend = null;
       else if (S.tool === 'scale' && !S.scaleDone && S.scalePts.length) S.scalePts = [];
       else if (S.tool !== 'view') setTool('view');
@@ -614,7 +616,7 @@
   });
   window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; });
 
-  /* Undo the last point of the unfinished work. */
+  /* Remove the last point. */
   function undoPoint() {
     if (S.tool === 'scale' && !S.scaleDone) { S.scalePts.pop(); requestDraw(); }
     else if (S.pend) { S.pend = null; requestDraw(); }
@@ -628,7 +630,7 @@
     requestDraw();
   }
 
-  // A button must not keep the focus. Otherwise the space key would press it again.
+  // A button must not keep the focus. If it keeps the focus, the space key pushes it again.
   document.addEventListener('click', (e) => { if (e.target.tagName === 'BUTTON') e.target.blur(); });
 
   /* ---------- controls ---------- */
@@ -705,7 +707,7 @@
 
   $('pos').addEventListener('input', () => { S.pos = $('pos').value / 1000; updateInfo(); requestDraw(); });
 
-  // Play: move the vehicle along the path at 3 m/s.
+  // Play. Move the vehicle along the path at 3 m/s.
   let lastT = 0;
   function tick(t) {
     if (!S.playing) return;
@@ -739,7 +741,7 @@
       (r.detail ? ' <span class="mute">(' + r.detail + ')</span>' : '') + '</div>').join('');
   });
 
-  // Drag and drop of a PDF file.
+  // Drag a PDF file onto the page and drop it.
   const drop = $('drop');
   window.addEventListener('dragover', (e) => { e.preventDefault(); drop.style.display = 'flex'; });
   window.addEventListener('dragleave', (e) => { if (!e.relatedTarget) drop.style.display = 'none'; });

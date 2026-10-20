@@ -56,18 +56,20 @@
       <label for="v_width">Breite o. Spiegel [m]</label><input id="v_width" type="number" step="0.01">
       <label for="v_rout">Wendekreisradius außen [m]</label><input id="v_rout" type="number" step="0.01">
       <label for="v_track">Spurweite (Darstellung) [m]</label><input id="v_track" type="number" step="0.01">
+      <label for="v_rate">Max. Lenkwinkeländerung [°/m]</label><input id="v_rate" type="number" step="1" min="1">
+      <label for="v_ratio">Lenkübersetzung (Lenkrad : Rad)</label><input id="v_ratio" type="number" step="0.5" min="1">
     </div>
     <div id="vInfo" class="mute" style="margin-top:6px"></div>
 
-    <h2>4 · Fahrweg &amp; Hindernisse</h2>
+    <h2>4 · Fahren &amp; Hindernisse</h2>
     <div class="row">
       <button data-tool="pan">Verschieben</button>
-      <button data-tool="path">Fahrweg</button>
+      <button data-tool="drive">Fahren</button>
       <button data-tool="obst">Hindernis</button>
     </div>
     <div class="row">
-      <button id="pathReverse">Richtung umkehren</button>
-      <button id="pathClear">Fahrweg löschen</button>
+      <button id="driveUndo">Letztes Ziel zurück</button>
+      <button id="driveReset">Fahrt neu starten</button>
       <button id="obstUndo">Letztes Hindernis löschen</button>
     </div>
     <div id="hint"></div>

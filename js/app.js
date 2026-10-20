@@ -16,15 +16,13 @@
     pend: null,                         // start point that waits for the direction click
     wps: [],                            // targets for the center of the front axle [pt]
     prev: null,                         // live preview of the next move
-    obsM: [],                           // obstacles in meters, with bounding boxes
-    obst: [], cur: [],                  // finished obstacles and the one in progress
-    tool: 'pan',
+    tool: 'scale',
     zoom: 1, ox: 0, oy: 0,              // view: screen = plan * zoom + offset
     pos: 0, playing: false,
     mouse: null, res: null
   };
   const veh = Object.assign({}, Sim.DEFAULT_VEHICLE);
-  let pdfDoc = null, spaceDown = false, drag = null, lastDown = { t: 0, x: 0, y: 0 };
+  let pdfDoc = null, spaceDown = false, drag = null, lastClick = { t: 0, x: 0, y: 0 };
 
   /* ---------- view helpers ---------- */
   const s2p = (x, y) => ({ x: (x - S.ox) / S.zoom, y: (y - S.oy) / S.zoom });
@@ -53,7 +51,7 @@
   function resetProject() {
     S.mpp = null; S.scalePts = []; S.scaleDone = false;
     S.start = null; S.pend = null; S.wps = []; S.prev = null;
-    S.obst = []; S.cur = []; S.pos = 1; S.playing = false;
+    S.pos = 1; S.playing = false;
     $('pos').value = 1000;
   }
 
@@ -101,19 +99,12 @@
     if (pts.length < 2) return;
     let L = 0;
     for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
-    const ans = prompt('Länge des Linienzugs in m (' + (pts.length - 1) + ' Segment(e)):', '');
+    const ans = prompt('Länge der Strecke zwischen den beiden Punkten in m:', '');
     const m = ans == null ? NaN : parseFloat(String(ans).replace(',', '.'));
     if (!(m > 0)) { S.scalePts = []; requestDraw(); return; }
     S.mpp = Sim.scaleFromPolyline(pts, m);
     S.scaleDone = true;
     S.scaleLen = m;
-    recompute();
-  }
-
-  /* ---------- obstacles ---------- */
-  function finishObst() {
-    if (S.cur.length >= 3) S.obst.push(S.cur);
-    S.cur = [];
     recompute();
   }
 
@@ -123,11 +114,6 @@
     const lim = Sim.steerLimit(veh), o = Sim.driveOpts(veh);
     if (S.mpp && S.start && lim) {
       const m = S.mpp;
-      S.obsM = S.obst.map((poly) => {
-        const pts = poly.map((p) => ({ x: p.x * m, y: p.y * m }));
-        const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
-        return { pts: pts, x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
-      });
       const st = Sim.startState(veh, { x: S.start.p.x * m, y: S.start.p.y * m }, S.start.ang);
       const run = Sim.driveAll(st, S.wps.map((p) => ({ x: p.x * m, y: p.y * m })), veh, o);
       S.res = analyse(run.smp, lim);
@@ -156,9 +142,9 @@
 
   /* Build drawing paths (in meters) and numbers for a list of samples. */
   function analyse(smp, lim) {
-    const A = { smp: smp, sweep: new Path2D(), hit: new Path2D(), sat: new Path2D(), front: new Path2D(),
+    const A = { smp: smp, sweep: new Path2D(), sat: new Path2D(), front: new Path2D(),
                 rear: new Path2D(), trails: new Path2D(), sil: new Path2D(),
-                maxD: 0, satLen: 0, firstHit: null, length: smp[smp.length - 1].s };
+                maxD: 0, satLen: 0, length: smp[smp.length - 1].s };
     const trail = [[], [], [], []];
     const silStep = Math.max(0.5, parseFloat($('silStep').value) || 2);
     let nextSil = 0;
@@ -171,17 +157,6 @@
       if (i > 0 && Math.abs(p.d) >= lim.delta - 1e-3) {
         A.satLen += p.s - smp[i - 1].s;
         A.sat.moveTo(smp[i - 1].Fx, smp[i - 1].Fy); A.sat.lineTo(p.Fx, p.Fy);
-      }
-      // Test the body against each obstacle. Test the bounding box first.
-      const xs = poly.map((c) => c.x), ys = poly.map((c) => c.y);
-      const bx0 = Math.min(...xs), bx1 = Math.max(...xs), by0 = Math.min(...ys), by1 = Math.max(...ys);
-      for (const o of S.obsM) {
-        if (bx1 < o.x0 || bx0 > o.x1 || by1 < o.y0 || by0 > o.y1) continue;
-        if (Sim.polysIntersect(poly, o.pts)) {
-          addPoly(A.hit, poly);
-          if (A.firstHit == null) A.firstHit = p.s;
-          break;
-        }
       }
     });
     trail.forEach((t) => polyline(A.trails, t));
@@ -220,7 +195,7 @@
       $('scaleInfo').innerHTML = '1 m = ' + f(1 / S.mpp, 2) + ' pt · ca. 1:' + Math.round(ratio) + ' (bei Originalgröße)';
     } else {
       $('scaleInfo').textContent = S.tool === 'scale'
-        ? 'Klicke eine bekannte Strecke an. Doppelklick oder Enter beendet.' : 'nicht gesetzt';
+        ? 'Zwei Punkte einer bekannten Strecke anklicken.' : 'nicht gesetzt';
     }
     const R = S.res, P = S.prev, rows = [];
     if (!S.mpp) rows.push(['Status', '<span class="warn">Maßstab fehlt</span>']);
@@ -231,9 +206,6 @@
       rows.push(['Lenkrad max.', f(deg(R.maxD) * veh.ratio, 0) + '° von ' + f(deg(R.lim.delta) * veh.ratio, 0) + '°']);
       rows.push(['Lenkung am Anschlag', R.satLen > 0.01 ? '<span class="warn">' + f(R.satLen, 1) + ' m</span>' : 'nein']);
       if (R.fail) rows.push(['Ziel ' + (R.fail.index + 1), '<span class="bad">nicht erreichbar</span>']);
-      rows.push(['Hindernisse', S.obst.length === 0 ? '<span class="mute">keine</span>'
-        : R.firstHit == null ? '<span class="good">keine Kollision</span>'
-        : '<span class="bad">Kollision ab ' + f(R.firstHit, 1) + ' m</span>']);
       const q = R.smp[sampleIndex()];
       rows.push(['Position ' + f(q.s, 1) + ' m', 'Lenkwinkel ' + f(deg(q.d), 1) + '°']);
     }
@@ -241,8 +213,6 @@
       rows.push(['Vorschau', P.reached ? '<span class="good">Ziel erreichbar</span>'
         : '<span class="bad">Ziel nicht erreichbar</span>']);
       rows.push(['Vorschau: Lenkwinkel max.', f(deg(P.maxD), 1) + '° (Lenkrad ' + f(deg(P.maxD) * veh.ratio, 0) + '°)']);
-      if (S.obst.length) rows.push(['Vorschau: Hindernis', P.firstHit == null ? '<span class="good">frei</span>'
-        : '<span class="bad">Kollision</span>']);
     }
     $('res').innerHTML = rows.map((r) => '<span>' + r[0] + '</span><b>' + r[1] + '</b>').join('');
     $('posInfo').textContent = R ? f(R.smp[sampleIndex()].s, 1) + ' / ' + f(R.length, 1) + ' m' : '';
@@ -266,7 +236,6 @@
     ctx.fillRect(0, 0, S.pw, S.ph);
     if (S.pageImg) { ctx.imageSmoothingQuality = 'high'; ctx.drawImage(S.pageImg, 0, 0, S.pw, S.ph); }
     else drawGrid(px);
-    drawObstacles(px);
     drawScale(px);
     drawResult(px);
     drawPoints(px);
@@ -295,26 +264,21 @@
 
   function drawScale(px) {
     const pts = S.scalePts.slice();
-    if (!pts.length) return;
     if (S.tool === 'scale' && !S.scaleDone && S.mouse) pts.push(S.mouse);
     ctx.strokeStyle = '#f97316'; ctx.fillStyle = '#f97316'; ctx.lineWidth = 2.5 * px;
     strokePts(pts); ctx.stroke();
     S.scalePts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 4 * px, 0, 7); ctx.fill(); });
+    if (S.tool === 'scale' && !S.scaleDone && S.mouse) {      // cross at the mouse: find the points on the plan
+      ctx.lineWidth = px;
+      ctx.beginPath();
+      ctx.moveTo(S.mouse.x - 10 * px, S.mouse.y); ctx.lineTo(S.mouse.x + 10 * px, S.mouse.y);
+      ctx.moveTo(S.mouse.x, S.mouse.y - 10 * px); ctx.lineTo(S.mouse.x, S.mouse.y + 10 * px);
+      ctx.stroke();
+    }
     if (S.scaleDone && S.scaleLen) {
       const a = S.scalePts[0], b = S.scalePts[S.scalePts.length - 1];
       ctx.font = 13 * px + 'px system-ui,sans-serif';
       ctx.fillText(f(S.scaleLen, 2) + ' m', (a.x + b.x) / 2 + 6 * px, (a.y + b.y) / 2 - 6 * px);
-    }
-  }
-
-  function drawObstacles(px) {
-    ctx.lineWidth = 1.5 * px;
-    ctx.fillStyle = 'rgba(220,50,50,.30)'; ctx.strokeStyle = '#c0392b';
-    S.obst.forEach((o) => { strokePts(o, true); ctx.fill(); ctx.stroke(); });
-    if (S.cur.length) {
-      const pts = S.cur.slice();
-      if (S.tool === 'obst' && S.mouse) pts.push(S.mouse);
-      ctx.setLineDash([5 * px, 4 * px]); strokePts(pts); ctx.stroke(); ctx.setLineDash([]);
     }
   }
 
@@ -326,7 +290,6 @@
     ctx.scale(k, k);
     if (R) {
       if ($('oSweep').checked) { ctx.fillStyle = 'rgba(40,110,220,.22)'; ctx.fill(R.sweep); }
-      if (S.obst.length) { ctx.fillStyle = 'rgba(230,30,30,.40)'; ctx.fill(R.hit); }
       ctx.lineWidth = um; ctx.strokeStyle = 'rgba(20,70,170,.9)'; ctx.stroke(R.trails);
       if ($('oSil').checked) { ctx.strokeStyle = 'rgba(30,40,60,.55)'; ctx.stroke(R.sil); }
       ctx.strokeStyle = '#6b7280'; ctx.setLineDash([4 * um, 3 * um]); ctx.stroke(R.rear);
@@ -338,7 +301,6 @@
     if (P) {
       const ok = P.reached;
       ctx.fillStyle = ok ? 'rgba(22,163,74,.20)' : 'rgba(217,119,6,.24)'; ctx.fill(P.sweep);
-      if (S.obst.length) { ctx.fillStyle = 'rgba(230,30,30,.45)'; ctx.fill(P.hit); }
       ctx.lineWidth = um; ctx.strokeStyle = ok ? 'rgba(21,128,61,.9)' : 'rgba(194,65,12,.9)'; ctx.stroke(P.trails);
       ctx.strokeStyle = 'rgba(30,40,60,.45)'; ctx.stroke(P.sil);
       ctx.lineWidth = 2 * um; ctx.strokeStyle = ok ? '#15803d' : '#c2410c'; ctx.stroke(P.front);
@@ -432,17 +394,15 @@
 
   /* ---------- tools and input ---------- */
   const HINTS = {
-    pan: 'Verschieben: Ziehen mit der Maus. Mausrad zoomt. Mit Leertaste oder mittlerer Taste kann man in jedem Werkzeug verschieben.',
-    scale: 'Maßstab: Klicke auf einen Linienzug mit bekannter Länge (z. B. Bemaßung oder Fahrbahnbreite). Doppelklick oder Enter beendet und fragt die Länge in m ab. Esc bricht ab.',
-    drive: 'Fahren: 1. Klick = Startpunkt der Vorderachsmitte, 2. Klick = Fahrtrichtung. Danach zeigt die Vorschau live, wie das Fahrzeug mit begrenztem Lenkeinschlag zur Maus fährt. Klick = Ziel übernehmen (nur wenn erreichbar). Ziele ziehen = verschieben, Rechtsklick = löschen, Rückschritt = letztes Ziel zurück.',
-    obst: 'Hindernis: Klicke die Ecken eines Polygons (Bordstein, Mast, Gebäude). Doppelklick oder Enter schließt es. Esc bricht ab.'
+    scale: 'Maßstab: Zwei Punkte auf eine Strecke mit bekannter Länge klicken (Bemaßung, Fahrbahnbreite). Danach die Länge in m eingeben. Plan verschieben: mit der linken Maustaste ziehen. Zoom: Mausrad. Esc bricht ab.',
+    drive: 'Fahrweise 1: 1. Klick = Startpunkt der Vorderachsmitte, 2. Klick = Fahrtrichtung. Danach zeigt die Vorschau live: Lenkung schlägt stetig ein, Bogen bei Vollausschlag, Lenkung schlägt stetig aus, dann geradeaus zum Ziel. Die Kurve beginnt am letzten Ziel (dort Ziel setzen, wo eingelenkt wird). Klick = Ziel übernehmen (nur wenn erreichbar). Ziele ziehen = verschieben, Rechtsklick = löschen, Rückschritt = letztes Ziel zurück. Plan verschieben: ins Leere ziehen.'
   };
 
   function setTool(t) {
     S.tool = t;
     document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === t));
     $('hint').textContent = HINTS[t];
-    cv.style.cursor = t === 'pan' ? 'grab' : 'crosshair';
+    cv.style.cursor = 'crosshair';
     updateInfo(); requestDraw();
   }
 
@@ -458,31 +418,28 @@
 
   cv.addEventListener('contextmenu', (e) => e.preventDefault());
 
-  cv.addEventListener('pointerdown', (e) => {
-    const sp = evPos(e), p = s2p(sp.x, sp.y);
-    cv.setPointerCapture(e.pointerId);
-    if (e.button === 1 || S.tool === 'pan' || spaceDown) {
-      drag = { type: 'pan', sx: sp.x, sy: sp.y, ox: S.ox, oy: S.oy };
-      return;
-    }
-    if (e.button === 2) {
+  /* A click without movement sets a point. A drag of more than 4 px moves the plan.
+   * The middle button, the right button and the space key always move the plan. */
+  function clickAt(sp, p, button) {
+    if (!S.hasPage) return;
+    if (button === 2) {
       if (S.tool === 'drive') { const i = hitWp(sp); if (i >= 0) { S.wps.splice(i, 1); recompute(); } }
       return;
     }
-    if (e.button !== 0 || !S.hasPage) return;
+    if (button !== 0) return;
     // Ignore the second click of a double click.
     const now = performance.now();
-    const second = now - lastDown.t < 350 && Math.hypot(sp.x - lastDown.x, sp.y - lastDown.y) < 5;
-    lastDown = { t: now, x: sp.x, y: sp.y };
+    const second = now - lastClick.t < 350 && Math.hypot(sp.x - lastClick.x, sp.y - lastClick.y) < 5;
+    lastClick = { t: now, x: sp.x, y: sp.y };
     if (second) return;
     if (S.tool === 'scale') {
       if (S.scaleDone) { S.scalePts = []; S.scaleDone = false; S.mpp = null; recompute(); }
       S.scalePts.push(p);
+      requestDraw();
+      if (S.scalePts.length === 2) finishScale();     // two points are enough
     } else if (S.tool === 'drive') {
       if (!S.mpp) { $('hint').textContent = 'Zuerst den Maßstab setzen.'; return; }
-      const i = hitWp(sp);
-      if (S.start && i !== -1) drag = { type: i === -2 ? 'start' : 'wp', i: i };
-      else if (!S.start) {
+      if (!S.start) {
         if (!S.pend) S.pend = p;
         else if (Math.hypot(p.x - S.pend.x, p.y - S.pend.y) * S.zoom > 3) {
           S.start = { p: S.pend, ang: Math.atan2(p.y - S.pend.y, p.x - S.pend.x) };
@@ -494,15 +451,26 @@
         $('hint').textContent = 'Dieses Ziel ist mit dem begrenzten Lenkeinschlag nicht erreichbar. Wähle einen Punkt weiter vorn oder weiter seitlich.';
         $('hint').dataset.err = '1';
       }
-    } else if (S.tool === 'obst') {
-      S.cur.push(p);
     }
     requestDraw();
+  }
+
+  cv.addEventListener('pointerdown', (e) => {
+    const sp = evPos(e), p = s2p(sp.x, sp.y);
+    cv.setPointerCapture(e.pointerId);
+    const pan = { sx: sp.x, sy: sp.y, ox: S.ox, oy: S.oy };
+    if (e.button === 1 || spaceDown) { drag = Object.assign({ type: 'pan' }, pan); return; }
+    const i = S.tool === 'drive' && e.button === 0 ? hitWp(sp) : -1;
+    if (i !== -1) drag = { type: i === -2 ? 'start' : 'wp', i: i };     // move a target
+    else drag = Object.assign({ type: 'maybe', button: e.button, p: p }, pan);
   });
 
   cv.addEventListener('pointermove', (e) => {
     const sp = evPos(e);
     S.mouse = s2p(sp.x, sp.y);
+    if (drag && drag.type === 'maybe' && Math.hypot(sp.x - drag.sx, sp.y - drag.sy) > 4) {
+      drag.type = 'pan'; cv.style.cursor = 'grabbing';
+    }
     if (drag && drag.type === 'pan') {
       S.ox = drag.ox + sp.x - drag.sx; S.oy = drag.oy + sp.y - drag.sy;
     } else if (drag && drag.type === 'wp') {
@@ -515,13 +483,14 @@
     requestDraw();
   });
 
-  cv.addEventListener('pointerup', () => { drag = null; updatePreview(); });
-  cv.addEventListener('pointerleave', () => { if (!drag) { S.mouse = null; updatePreview(); } });
-
-  cv.addEventListener('dblclick', () => {
-    if (S.tool === 'scale') finishScale();
-    else if (S.tool === 'obst') finishObst();
+  cv.addEventListener('pointerup', (e) => {
+    const d = drag;
+    drag = null;
+    cv.style.cursor = 'crosshair';
+    if (d && d.type === 'maybe') clickAt({ x: d.sx, y: d.sy }, d.p, d.button);
+    updatePreview();
   });
+  cv.addEventListener('pointerleave', () => { if (!drag) { S.mouse = null; updatePreview(); } });
 
   cv.addEventListener('wheel', (e) => {
     e.preventDefault();
@@ -532,16 +501,13 @@
   }, { passive: false });
 
   window.addEventListener('keydown', (e) => {
-    if (/INPUT|TEXTAREA/.test(document.activeElement.tagName) && e.key !== 'Enter') return;
+    if (/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
     if (e.code === 'Space') { spaceDown = true; if (e.target === document.body) e.preventDefault(); }
-    else if (e.key === 'Enter') {
-      if (S.tool === 'scale') finishScale(); else if (S.tool === 'obst') finishObst();
-    } else if (e.key === 'Escape') {
-      S.cur = []; S.pend = null; if (!S.scaleDone) S.scalePts = [];
+    else if (e.key === 'Escape') {
+      S.pend = null; if (!S.scaleDone) S.scalePts = [];
       requestDraw();
     } else if (e.key === 'Backspace') {
-      if (S.tool === 'obst') S.cur.pop();
-      else if (S.tool === 'scale' && !S.scaleDone) S.scalePts.pop();
+      if (S.tool === 'scale' && !S.scaleDone) S.scalePts.pop();
       else if (S.tool === 'drive') { if (S.pend) S.pend = null; else if (S.wps.length) S.wps.pop(); else S.start = null; recompute(); }
       requestDraw();
     }
@@ -561,7 +527,6 @@
   });
   $('driveReset').addEventListener('click', () => { S.start = null; S.pend = null; S.wps = []; recompute(); });
   $('driveUndo').addEventListener('click', () => { if (S.wps.length) S.wps.pop(); else S.start = null; recompute(); });
-  $('obstUndo').addEventListener('click', () => { S.obst.pop(); recompute(); });
   $('fit').addEventListener('click', fitView);
   ['oSweep', 'oSil'].forEach((id) => $(id).addEventListener('change', requestDraw));
   $('silStep').addEventListener('change', recompute);
@@ -623,5 +588,5 @@
 
   window.addEventListener('resize', resize);
   window.Turn = { S: S, veh: veh, recompute: recompute, finishScale: finishScale, setTool: setTool, updatePreview: updatePreview };
-  resize(); setTool('pan'); updateInfo();
+  resize(); setTool('scale'); updateInfo();
 })();

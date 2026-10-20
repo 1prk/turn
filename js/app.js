@@ -142,7 +142,10 @@
     requestDraw();
   }
 
+  function failShort(fl) { return fl.kind === 'steer' ? 'Lenkwinkel zu groß' : 'Strecke ' + (fl.leg + 1) + ' zu kurz'; }
+
   function failText(fl) {
+    if (fl.kind === 'steer') return 'Der Lenkwinkel wäre ' + f(deg(fl.maxD), 1) + '° und damit über dem Limit.';
     return isFinite(fl.need)
       ? 'Strecke ' + (fl.leg + 1) + ' ist zu kurz für die Kurven an ihren Enden: nötig ' + f(fl.need, 1) + ' m, vorhanden ' + f(fl.have, 1) + ' m.'
       : 'Eine Umkehr um fast 180° ist mit einer Ecke nicht fahrbar.';
@@ -162,7 +165,7 @@
       if (i % 2 === 0 || i === smp.length - 1) addPoly(A.sweep, poly);
       if (p.s >= nextSil) { addPoly(A.sil, poly); nextSil += silStep; }
       A.maxD = Math.max(A.maxD, Math.abs(p.d));
-      if (i > 0 && Math.abs(p.d) >= lim.delta - 1e-3) {
+      if (i > 0 && Math.abs(p.d) >= lim.delta - 0.0087) {
         A.satLen += p.s - smp[i - 1].s;
         A.sat.moveTo(smp[i - 1].Fx, smp[i - 1].Fy); A.sat.lineTo(p.Fx, p.Fy);
       }
@@ -207,13 +210,13 @@
       rows.push(['Max. Lenkwinkel', f(deg(R.maxD), 1) + '° von ' + f(deg(R.lim.delta), 1) + '°']);
       rows.push(['Lenkrad max.', f(deg(R.maxD) * veh.ratio, 0) + '° von ' + f(deg(R.lim.delta) * veh.ratio, 0) + '°']);
       rows.push(['Lenkung am Anschlag', R.satLen > 0.01 ? '<span class="warn">' + f(R.satLen, 1) + ' m</span>' : 'nein']);
-      if (R.fail) rows.push(['Leitlinie', '<span class="bad">Strecke ' + (R.fail.leg + 1) + ' zu kurz</span>']);
+      if (R.fail) rows.push(['Leitlinie', '<span class="bad">' + failShort(R.fail) + '</span>']);
       const q = R.smp[sampleIndex()];
       rows.push(['Position ' + f(q.s, 1) + ' m', 'Lenkwinkel ' + f(deg(q.d), 1) + '°']);
     }
     if (P) {
       rows.push(['Vorschau', P.ok ? '<span class="good">fahrbar</span>'
-        : '<span class="bad">Strecke ' + (P.fail.leg + 1) + ' zu kurz</span>']);
+        : '<span class="bad">' + failShort(P.fail) + '</span>']);
       rows.push(['Vorschau: Lenkwinkel max.', f(deg(P.maxD), 1) + '° (Lenkrad ' + f(deg(P.maxD) * veh.ratio, 0) + '°)']);
     }
     $('res').innerHTML = rows.map((r) => '<span>' + r[0] + '</span><b>' + r[1] + '</b>').join('');
@@ -371,7 +374,7 @@
     ctx.fillStyle = 'rgba(255,255,255,.92)'; ctx.fillRect(cx - 80, cy - 52, 160, 130);
     ctx.strokeStyle = '#d9dde4'; ctx.strokeRect(cx - 80, cy - 52, 160, 130);
     ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang);
-    ctx.strokeStyle = Math.abs(q.d) >= lim - 1e-3 ? '#d97706' : '#1d2330'; ctx.lineWidth = 5;
+    ctx.strokeStyle = Math.abs(q.d) >= lim - 0.0087 ? '#d97706' : '#1d2330'; ctx.lineWidth = 5;
     ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.stroke();
     ctx.lineWidth = 4; ctx.beginPath();
     ctx.moveTo(-r, 0); ctx.lineTo(r, 0); ctx.moveTo(0, 0); ctx.lineTo(0, r);
@@ -381,7 +384,7 @@
     // Bar: steering angle compared with the limit.
     const bx = cx - 52, bw = 104, by = cy + 52;
     ctx.fillStyle = '#e5e7eb'; ctx.fillRect(bx, by, bw, 6);
-    ctx.fillStyle = Math.abs(q.d) >= lim - 1e-3 ? '#d97706' : '#1f6feb';
+    ctx.fillStyle = Math.abs(q.d) >= lim - 0.0087 ? '#d97706' : '#1f6feb';
     const u = Math.max(-1, Math.min(1, q.d / lim)) * bw / 2;
     ctx.fillRect(bx + bw / 2 + Math.min(0, u), by, Math.abs(u), 6);
     ctx.fillStyle = '#1d2330'; ctx.font = '11px system-ui,sans-serif'; ctx.textAlign = 'center';
@@ -393,7 +396,7 @@
   /* ---------- tools and input ---------- */
   const HINTS = {
     scale: 'Maßstab: Zwei Punkte auf eine Strecke mit bekannter Länge klicken (Bemaßung, Fahrbahnbreite). Danach die Länge in m eingeben. Plan verschieben: mit der linken Maustaste ziehen. Zoom: Mausrad. Esc bricht ab.',
-    drive: 'Fahrweise 1: Klicke die Eckpunkte der Leitlinie (Gerade, Gerade, …) der Vorderachsmitte. 1. Klick = Start, 2. Klick = erste Gerade und Fahrtrichtung. An jedem Eckpunkt wird automatisch eine Kurve eingefügt (Lenkung schlägt stetig ein, Bogen bei Vollausschlag, schlägt stetig aus); sie beginnt vor dem Eckpunkt. Die Vorschau zeigt live das Fahrzeug an der Maus. Ein Klick wird nur übernommen, wenn die Strecken für die Kurven lang genug sind (sonst rot). Punkte ziehen = verschieben, Rechtsklick = löschen, Rückschritt = letzten Punkt zurück. Plan verschieben: ins Leere ziehen.'
+    drive: 'Fahrweise 1: Klicke die Eckpunkte der Leitlinie der Vorderachsmitte. 1. Klick = Start, 2. Klick = erste Gerade und Fahrtrichtung. An jedem Eckpunkt entsteht automatisch ein Kreisbogen, der tangential an die Geraden anschließt (kein Knick). Je weiter die Punkte auseinander liegen, desto größer wird der Bogen. Der Radius unterschreitet nie den Wendekreis. Die Vorschau zeigt live das Fahrzeug an der Maus. Ein Klick wird nur übernommen, wenn die Strecken für die Kurven lang genug sind (sonst orange). Punkte ziehen = verschieben, Rechtsklick = löschen, Rückschritt = letzten Punkt zurück. Plan verschieben: ins Leere ziehen.'
   };
 
   function setTool(t) {
@@ -536,7 +539,7 @@
   ['oSweep', 'oSil'].forEach((id) => $(id).addEventListener('change', requestDraw));
   $('silStep').addEventListener('change', recompute);
 
-  const FIELDS = { v_wb: 'wb', v_front: 'front', v_rear: 'rear', v_width: 'width', v_rout: 'rOuter', v_track: 'track', v_rate: 'rateDeg', v_ratio: 'ratio' };
+  const FIELDS = { v_wb: 'wb', v_front: 'front', v_rear: 'rear', v_width: 'width', v_rout: 'rOuter', v_track: 'track', v_ratio: 'ratio' };
   Object.keys(FIELDS).forEach((id) => {
     $(id).value = veh[FIELDS[id]];
     $(id).addEventListener('input', () => {

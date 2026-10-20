@@ -111,33 +111,41 @@
   /* ---------- calculation ---------- */
   function recompute() {
     S.res = null; S.prev = null;
-    const lim = Sim.steerLimit(veh), o = Sim.driveOpts(veh);
+    const lim = Sim.steerLimit(veh);
     if (S.mpp && S.start && lim) {
-      const m = S.mpp;
-      const st = Sim.startState(veh, { x: S.start.p.x * m, y: S.start.p.y * m }, S.start.ang);
-      const run = Sim.driveAll(st, S.wps.map((p) => ({ x: p.x * m, y: p.y * m })), veh, o);
+      const run = Sim.buildRoute(routeM(null), veh, Sim.driveOpts(veh));
       S.res = analyse(run.smp, lim);
-      S.res.lim = lim; S.res.fail = run.fail; S.res.wpIdx = run.wpIdx;
-      if (run.fail) S.res.failPath = polyPath(run.fail.samples);
+      S.res.lim = lim; S.res.fail = run.fail;
     }
     updatePreview();
   }
 
-  /* Calculate the live preview: drive from the end of the path to the mouse. */
+  /* Corner points of the guide line in meters. extra = one more point (plan units) or null. */
+  function routeM(extra) {
+    const pts = [S.start.p].concat(S.wps, extra ? [extra] : []);
+    return pts.map((q) => ({ x: q.x * S.mpp, y: q.y * S.mpp }));
+  }
+
+  /* Calculate the live preview: the guide line with the mouse as the next corner point.
+   * The vehicle is always shown. If a straight line is too short for a turn, the preview is not usable. */
   function updatePreview() {
     S.prev = null;
     const R = S.res;
-    if (R && !R.fail && S.tool === 'drive' && S.mouse && !(drag && drag.type === 'wp')) {
-      const m = S.mpp, end = R.smp[R.smp.length - 1];
-      const r = Sim.driveTo(end, { x: S.mouse.x * m, y: S.mouse.y * m }, veh, Sim.driveOpts(veh));
-      const smp = [end].concat(r.samples);
-      S.prev = analyse(smp, R.lim);
-      S.prev.reached = r.reached; S.prev.end = smp[smp.length - 1];
+    if (R && S.tool === 'drive' && S.mouse && !drag) {
+      const run = Sim.buildRoute(routeM(S.mouse), veh, Sim.driveOpts(veh));
+      S.prev = analyse(run.smp, R.lim);
+      S.prev.fail = run.fail; S.prev.ok = !run.fail; S.prev.end = run.smp[run.smp.length - 1];
       // Show the normal hint again after an error message.
-      if (r.reached && $('hint').dataset.err) { $('hint').textContent = HINTS[S.tool]; delete $('hint').dataset.err; }
+      if (S.prev.ok && $('hint').dataset.err) { $('hint').textContent = HINTS[S.tool]; delete $('hint').dataset.err; }
     }
     updateInfo();
     requestDraw();
+  }
+
+  function failText(fl) {
+    return isFinite(fl.need)
+      ? 'Strecke ' + (fl.leg + 1) + ' ist zu kurz für die Kurven an ihren Enden: nötig ' + f(fl.need, 1) + ' m, vorhanden ' + f(fl.have, 1) + ' m.'
+      : 'Eine Umkehr um fast 180° ist mit einer Ecke nicht fahrbar.';
   }
 
   /* Build drawing paths (in meters) and numbers for a list of samples. */
@@ -163,12 +171,6 @@
     polyline(A.front, smp.map((p) => ({ x: p.Fx, y: p.Fy })));
     polyline(A.rear, smp.map((p) => ({ x: p.Rx, y: p.Ry })));
     return A;
-  }
-
-  function polyPath(smp) {
-    const path = new Path2D();
-    if (smp.length) polyline(path, smp.map((p) => ({ x: p.Fx, y: p.Fy })));
-    return path;
   }
 
   function addPoly(path, poly) {
@@ -199,19 +201,19 @@
     }
     const R = S.res, P = S.prev, rows = [];
     if (!S.mpp) rows.push(['Status', '<span class="warn">Maßstab fehlt</span>']);
-    else if (!S.start) rows.push(['Status', '<span class="mute">Startpunkt und Richtung setzen</span>']);
+    else if (!S.start) rows.push(['Status', '<span class="mute">Startpunkt und ersten Punkt der Leitlinie setzen</span>']);
     else if (R) {
       rows.push(['Weglänge', f(R.length, 1) + ' m']);
       rows.push(['Max. Lenkwinkel', f(deg(R.maxD), 1) + '° von ' + f(deg(R.lim.delta), 1) + '°']);
       rows.push(['Lenkrad max.', f(deg(R.maxD) * veh.ratio, 0) + '° von ' + f(deg(R.lim.delta) * veh.ratio, 0) + '°']);
       rows.push(['Lenkung am Anschlag', R.satLen > 0.01 ? '<span class="warn">' + f(R.satLen, 1) + ' m</span>' : 'nein']);
-      if (R.fail) rows.push(['Ziel ' + (R.fail.index + 1), '<span class="bad">nicht erreichbar</span>']);
+      if (R.fail) rows.push(['Leitlinie', '<span class="bad">Strecke ' + (R.fail.leg + 1) + ' zu kurz</span>']);
       const q = R.smp[sampleIndex()];
       rows.push(['Position ' + f(q.s, 1) + ' m', 'Lenkwinkel ' + f(deg(q.d), 1) + '°']);
     }
     if (P) {
-      rows.push(['Vorschau', P.reached ? '<span class="good">Ziel erreichbar</span>'
-        : '<span class="bad">Ziel nicht erreichbar</span>']);
+      rows.push(['Vorschau', P.ok ? '<span class="good">fahrbar</span>'
+        : '<span class="bad">Strecke ' + (P.fail.leg + 1) + ' zu kurz</span>']);
       rows.push(['Vorschau: Lenkwinkel max.', f(deg(P.maxD), 1) + '° (Lenkrad ' + f(deg(P.maxD) * veh.ratio, 0) + '°)']);
     }
     $('res').innerHTML = rows.map((r) => '<span>' + r[0] + '</span><b>' + r[1] + '</b>').join('');
@@ -288,25 +290,15 @@
     const k = 1 / S.mpp, um = px * S.mpp;        // meters -> pt, and one pixel in meters
     ctx.save();
     ctx.scale(k, k);
-    if (R) {
-      if ($('oSweep').checked) { ctx.fillStyle = 'rgba(40,110,220,.22)'; ctx.fill(R.sweep); }
-      ctx.lineWidth = um; ctx.strokeStyle = 'rgba(20,70,170,.9)'; ctx.stroke(R.trails);
-      if ($('oSil').checked) { ctx.strokeStyle = 'rgba(30,40,60,.55)'; ctx.stroke(R.sil); }
-      ctx.strokeStyle = '#6b7280'; ctx.setLineDash([4 * um, 3 * um]); ctx.stroke(R.rear);
-      ctx.strokeStyle = '#111'; ctx.lineWidth = 1.5 * um; ctx.setLineDash([]); ctx.stroke(R.front);
-      ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 4 * um; ctx.stroke(R.sat);   // steering at the stop
-      if (R.failPath) { ctx.strokeStyle = '#e11d1d'; ctx.setLineDash([6 * um, 4 * um]); ctx.lineWidth = 2 * um; ctx.stroke(R.failPath); ctx.setLineDash([]); }
-      drawVehicle(R.smp[sampleIndex()], um, 1);
-    }
-    if (P) {
-      const ok = P.reached;
-      ctx.fillStyle = ok ? 'rgba(22,163,74,.20)' : 'rgba(217,119,6,.24)'; ctx.fill(P.sweep);
-      ctx.lineWidth = um; ctx.strokeStyle = ok ? 'rgba(21,128,61,.9)' : 'rgba(194,65,12,.9)'; ctx.stroke(P.trails);
-      ctx.strokeStyle = 'rgba(30,40,60,.45)'; ctx.stroke(P.sil);
-      ctx.lineWidth = 2 * um; ctx.strokeStyle = ok ? '#15803d' : '#c2410c'; ctx.stroke(P.front);
-      ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 4 * um; ctx.stroke(P.sat);
-      drawVehicle(P.end, um, 0.6);
-    }
+    // With a preview, the preview shows the whole route. Without it, the fixed route is shown.
+    const A = P || R, ok = P ? P.ok : !R.fail;
+    if ($('oSweep').checked) { ctx.fillStyle = ok ? (P ? 'rgba(22,163,74,.20)' : 'rgba(40,110,220,.22)') : 'rgba(217,70,20,.25)'; ctx.fill(A.sweep); }
+    ctx.lineWidth = um; ctx.strokeStyle = ok ? (P ? 'rgba(21,128,61,.9)' : 'rgba(20,70,170,.9)') : 'rgba(194,65,12,.9)'; ctx.stroke(A.trails);
+    if ($('oSil').checked) { ctx.strokeStyle = 'rgba(30,40,60,.5)'; ctx.stroke(A.sil); }
+    ctx.strokeStyle = '#6b7280'; ctx.setLineDash([4 * um, 3 * um]); ctx.stroke(A.rear);
+    ctx.strokeStyle = ok ? '#111' : '#c2410c'; ctx.lineWidth = 1.5 * um; ctx.setLineDash([]); ctx.stroke(A.front);
+    ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 4 * um; ctx.stroke(A.sat);   // steering at the stop
+    drawVehicle(P ? P.end : R.smp[sampleIndex()], um, P ? 0.75 : 1);
     ctx.restore();
   }
 
@@ -338,7 +330,13 @@
       ctx.beginPath(); ctx.arc(p.x, p.y, 5 * px, 0, 7);
       ctx.fillStyle = fill; ctx.fill(); ctx.lineWidth = 1.5 * px; ctx.strokeStyle = '#111'; ctx.stroke();
     };
-    if (S.start) dot(S.start.p, '#16a34a');
+    if (S.start) {      // the straight lines of the guide line, with corner points
+      const pts = [S.start.p].concat(S.wps);
+      if (S.tool === 'drive' && S.mouse) pts.push(S.mouse);
+      ctx.save(); ctx.setLineDash([6 * px, 5 * px]); ctx.lineWidth = px; ctx.strokeStyle = '#7c3aed';
+      strokePts(pts); ctx.stroke(); ctx.restore();
+      dot(S.start.p, '#16a34a');
+    }
     S.wps.forEach((p, i) => {
       dot(p, '#fff');
       ctx.fillStyle = '#111'; ctx.font = 11 * px + 'px system-ui,sans-serif';
@@ -353,7 +351,7 @@
         ctx.save(); ctx.scale(1 / S.mpp, 1 / S.mpp); drawVehicle(st, px * S.mpp, 0.7); ctx.restore();
       }
     } else if (S.mouse) {
-      const bad = S.prev && !S.prev.reached;
+      const bad = S.prev && !S.prev.ok;
       ctx.strokeStyle = bad ? '#c2410c' : '#15803d'; ctx.lineWidth = 2 * px;
       ctx.beginPath(); ctx.arc(S.mouse.x, S.mouse.y, 7 * px, 0, 7);
       ctx.moveTo(S.mouse.x - 11 * px, S.mouse.y); ctx.lineTo(S.mouse.x + 11 * px, S.mouse.y);
@@ -395,7 +393,7 @@
   /* ---------- tools and input ---------- */
   const HINTS = {
     scale: 'Maßstab: Zwei Punkte auf eine Strecke mit bekannter Länge klicken (Bemaßung, Fahrbahnbreite). Danach die Länge in m eingeben. Plan verschieben: mit der linken Maustaste ziehen. Zoom: Mausrad. Esc bricht ab.',
-    drive: 'Fahrweise 1: 1. Klick = Startpunkt der Vorderachsmitte, 2. Klick = Fahrtrichtung. Danach zeigt die Vorschau live: Lenkung schlägt stetig ein, Bogen bei Vollausschlag, Lenkung schlägt stetig aus, dann geradeaus zum Ziel. Die Kurve beginnt am letzten Ziel (dort Ziel setzen, wo eingelenkt wird). Klick = Ziel übernehmen (nur wenn erreichbar). Ziele ziehen = verschieben, Rechtsklick = löschen, Rückschritt = letztes Ziel zurück. Plan verschieben: ins Leere ziehen.'
+    drive: 'Fahrweise 1: Klicke die Eckpunkte der Leitlinie (Gerade, Gerade, …) der Vorderachsmitte. 1. Klick = Start, 2. Klick = erste Gerade und Fahrtrichtung. An jedem Eckpunkt wird automatisch eine Kurve eingefügt (Lenkung schlägt stetig ein, Bogen bei Vollausschlag, schlägt stetig aus); sie beginnt vor dem Eckpunkt. Die Vorschau zeigt live das Fahrzeug an der Maus. Ein Klick wird nur übernommen, wenn die Strecken für die Kurven lang genug sind (sonst rot). Punkte ziehen = verschieben, Rechtsklick = löschen, Rückschritt = letzten Punkt zurück. Plan verschieben: ins Leere ziehen.'
   };
 
   function setTool(t) {
@@ -418,12 +416,19 @@
 
   cv.addEventListener('contextmenu', (e) => e.preventDefault());
 
+  /* Remove corner point i (or the last one). Without corner points, the start is removed too. */
+  function removeWp(i) {
+    S.wps.splice(i == null ? S.wps.length - 1 : i, 1);
+    if (!S.wps.length) S.start = null;
+    recompute();
+  }
+
   /* A click without movement sets a point. A drag of more than 4 px moves the plan.
    * The middle button, the right button and the space key always move the plan. */
   function clickAt(sp, p, button) {
     if (!S.hasPage) return;
     if (button === 2) {
-      if (S.tool === 'drive') { const i = hitWp(sp); if (i >= 0) { S.wps.splice(i, 1); recompute(); } }
+      if (S.tool === 'drive') { const i = hitWp(sp); if (i >= 0) removeWp(i); }
       return;
     }
     if (button !== 0) return;
@@ -442,13 +447,13 @@
       if (!S.start) {
         if (!S.pend) S.pend = p;
         else if (Math.hypot(p.x - S.pend.x, p.y - S.pend.y) * S.zoom > 3) {
-          S.start = { p: S.pend, ang: Math.atan2(p.y - S.pend.y, p.x - S.pend.x) };
+          S.start = { p: S.pend }; S.wps = [p];       // the second click is the first corner point
           S.pend = null; S.pos = 1; $('pos').value = 1000; recompute();
         }
-      } else if (S.prev && S.prev.reached) {
+      } else if (S.prev && S.prev.ok) {
         S.wps.push(p); S.pos = 1; $('pos').value = 1000; recompute();
       } else {
-        $('hint').textContent = 'Dieses Ziel ist mit dem begrenzten Lenkeinschlag nicht erreichbar. Wähle einen Punkt weiter vorn oder weiter seitlich.';
+        $('hint').textContent = S.prev ? failText(S.prev.fail) + ' Wähle den Punkt weiter weg.' : 'Dieser Punkt ist nicht fahrbar.';
         $('hint').dataset.err = '1';
       }
     }
@@ -508,7 +513,7 @@
       requestDraw();
     } else if (e.key === 'Backspace') {
       if (S.tool === 'scale' && !S.scaleDone) S.scalePts.pop();
-      else if (S.tool === 'drive') { if (S.pend) S.pend = null; else if (S.wps.length) S.wps.pop(); else S.start = null; recompute(); }
+      else if (S.tool === 'drive') { if (S.pend) S.pend = null; else if (S.start) removeWp(); recompute(); }
       requestDraw();
     }
   });
@@ -526,7 +531,7 @@
     S.mpp = null; S.scalePts = []; S.scaleDone = false; setTool('scale'); recompute();
   });
   $('driveReset').addEventListener('click', () => { S.start = null; S.pend = null; S.wps = []; recompute(); });
-  $('driveUndo').addEventListener('click', () => { if (S.wps.length) S.wps.pop(); else S.start = null; recompute(); });
+  $('driveUndo').addEventListener('click', () => { if (S.start) removeWp(); });
   $('fit').addEventListener('click', fitView);
   ['oSweep', 'oSil'].forEach((id) => $(id).addEventListener('change', requestDraw));
   $('silStep').addEventListener('change', recompute);

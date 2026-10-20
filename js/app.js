@@ -147,6 +147,8 @@
       const smp = [end].concat(r.samples);
       S.prev = analyse(smp, R.lim);
       S.prev.reached = r.reached; S.prev.end = smp[smp.length - 1];
+      // Show the normal hint again after an error message.
+      if (r.reached && $('hint').dataset.err) { $('hint').textContent = HINTS[S.tool]; delete $('hint').dataset.err; }
     }
     updateInfo();
     requestDraw();
@@ -404,10 +406,10 @@
     if (!q || !S.res) return;
     const dpr = window.devicePixelRatio || 1, w = cv.width / dpr;
     const lim = S.res.lim.delta, ang = q.d * veh.ratio;
-    const cx = w - 70, cy = 70, r = 38, full = lim * veh.ratio;
+    const cx = w - 90, cy = 70, r = 38, full = lim * veh.ratio;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = 'rgba(255,255,255,.92)'; ctx.fillRect(cx - 62, cy - 52, 124, 130);
-    ctx.strokeStyle = '#d9dde4'; ctx.strokeRect(cx - 62, cy - 52, 124, 130);
+    ctx.fillStyle = 'rgba(255,255,255,.92)'; ctx.fillRect(cx - 80, cy - 52, 160, 130);
+    ctx.strokeStyle = '#d9dde4'; ctx.strokeRect(cx - 80, cy - 52, 160, 130);
     ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang);
     ctx.strokeStyle = Math.abs(q.d) >= lim - 1e-3 ? '#d97706' : '#1d2330'; ctx.lineWidth = 5;
     ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.stroke();
@@ -490,6 +492,7 @@
         S.wps.push(p); S.pos = 1; $('pos').value = 1000; recompute();
       } else {
         $('hint').textContent = 'Dieses Ziel ist mit dem begrenzten Lenkeinschlag nicht erreichbar. Wähle einen Punkt weiter vorn oder weiter seitlich.';
+        $('hint').dataset.err = '1';
       }
     } else if (S.tool === 'obst') {
       S.cur.push(p);

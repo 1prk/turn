@@ -74,7 +74,13 @@
     </div>
     <div class="row">Nächster Abschnitt:
       <button data-seg="line" title="Taste G: Gerade bis zum Punkt, an Ecken entsteht ein Bogen">Gerade / Ecke (G)</button>
-      <button data-seg="arc" title="Taste B: Kreisbogen durch den Punkt, für Wenden in einem Zug">Bogen / Wende (B)</button>
+      <button data-seg="arc" title="Taste B: Kreisbogen vom Fahrzeugende durch den Punkt an der Maus">Bogen durch Punkt (B)</button>
+      <button data-seg="turn" title="Taste K: Kurve mit Richtungsänderung in gon und Radius, Taste W: Wende mit 200 gon">Kurve nach Winkel (K)</button>
+    </div>
+    <div class="row" id="turnRow">Kurve:
+      <input id="turnGon" type="number" value="200" min="1" max="390" step="5" style="width:68px" title="Richtungsänderung in gon. 200 gon = Wende in einem Zug"> gon
+      <label title="Radius gleich Wendekreis (voller Lenkeinschlag, Fahrweise 1)"><input type="checkbox" id="turnRmin" checked> Wendekreis</label>
+      <input id="turnR" type="number" value="" min="0" step="0.5" style="width:64px" disabled title="Radius der Vorderachsmitte in m. Nicht kleiner als der Wendekreis"> m
     </div>
     <div class="row">
       <button id="driveUndo" title="Rücktaste oder Strg+Z">Letzten Punkt zurück</button>
@@ -94,7 +100,9 @@
     <div class="keys">
       <kbd>F</kbd><span>Fahrlinie bearbeiten</span>
       <kbd>G</kbd><span>Abschnitt: Gerade / Ecke</span>
-      <kbd>B</kbd><span>Abschnitt: Bogen / Wende in einem Zug</span>
+      <kbd>B</kbd><span>Abschnitt: Bogen durch Punkt</span>
+      <kbd>K</kbd><span>Abschnitt: Kurve nach Winkel (gon, Radius)</span>
+      <kbd>W</kbd><span>Wende in einem Zug (Kurve mit 200 gon)</span>
       <kbd>Esc</kbd><span>Fahrlinie beenden (erst Unfertiges verwerfen)</span>
       <kbd>M</kbd><span>Maßstab setzen</span>
       <kbd>⌫</kbd><span>letzten Punkt zurück (auch <kbd>Strg</kbd>+<kbd>Z</kbd>)</span>

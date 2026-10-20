@@ -21,21 +21,33 @@ Browserbasierte Prüfung von Schleppkurven auf einem PDF-Lageplan. Kein Server, 
 Lenkrad, Drehung der Bögen, Richtungsänderung.
 
 ## Wende in einem Zug
-Zwei Arten von Abschnitten, umschaltbar mit **G** (Gerade / Ecke) und **B** (Bogen / Wende):
-- **Gerade / Ecke:** Gerade bis zum Punkt. Zwischen zwei Geraden entsteht ein tangentialer Bogen (Ecke).
+Die Recherche (siehe [docs/recherche-schleppkurven.md](docs/recherche-schleppkurven.md)) zeigt: Die RBSV 2020 gibt ihre
+Schleppkurvenschablonen für **Richtungsänderungswinkel von 40 bis 200 gon** an, und AutoTURN arbeitet mit „Corner Path“
+(Radius und Drehwinkel) und „Arc Path“ (Bogen zur Maus). Es gibt deshalb drei Arten von Abschnitten, umschaltbar mit
+**G**, **B** und **K**:
+- **Gerade / Ecke (G):** Gerade bis zum Punkt. Zwischen zwei Geraden entsteht ein tangentialer Bogen (Ecke).
   Eine Ecke von fast 200 gon geht nicht, denn die Ausrundung bräuchte unendlich lange Geraden.
-- **Bogen / Wende:** ein Kreisbogen, der am letzten Punkt tangential zur Fahrtrichtung beginnt und durch den Punkt
-  an der Maus geht (Raute). Der Radius ergibt sich aus der Geometrie. Liegt der Punkt gegenüber (Fahrbahnbreite ≥ 2 ·
-  Radius), entsteht ein Halbkreis (200 gon). Liegt er hinten seitlich, dreht das Fahrzeug mehr als 200 gon.
-  Liegt der Punkt innerhalb des Mindestwendekreises, wird er nach außen auf den kleinsten möglichen Bogen begrenzt.
-  Eine Gerade nach einem Bogen führt tangential geradeaus aus dem Bogen heraus (Punkte daneben werden auf diese Linie
-  gelegt).
+- **Kurve nach Winkel (K):** Ein Bogen mit der **Richtungsänderung in gon** und einem Radius. Der Radius ist
+  standardmäßig der Wendekreis (voller Einschlag, Fahrweise 1). Ein größerer Radius ist im Feld „m“ einstellbar. Ein
+  kleinerer Radius als der Wendekreis geht nicht. Die Kurve beginnt am Ende der Fahrlinie. Die Maus links oder rechts
+  vom Fahrzeug wählt die Drehrichtung, ein Klick setzt die Kurve (Quadrat). Danach läuft eine Gerade tangential heraus.
+  **Taste W** wählt direkt eine Wende mit 200 gon in einem Zug. Eine Wende braucht mindestens 2 · R Platz in der Breite
+  (PKW 9,07 m, LKW 15,38 m).
+- **Bogen durch Punkt (B):** ein Kreisbogen vom Ende der Fahrlinie durch den Punkt an der Maus (Raute). Der Radius ergibt
+  sich aus der Geometrie. Liegt der Punkt gegenüber, entsteht ein Halbkreis. Liegt er hinten seitlich, dreht das
+  Fahrzeug mehr als 200 gon. Liegt der Punkt innerhalb des Mindestwendekreises, wird er auf den kleinsten möglichen Bogen
+  begrenzt.
+- **Gerade nach Bogen oder Kurve:** Sie führt tangential geradeaus heraus. Punkte daneben werden auf diese Linie gelegt.
+
+Beim Wenden mit 200 gon und Mindestradius liegt der Außenradius der Karosserie genau auf dem Wendekreis (im Selbsttest:
+PKW 5,85 m, LKW 9,45 m bei 9,46 m).
 
 ## Tastenkürzel
 | Taste | Funktion |
 |---|---|
 | `F` | Fahrlinie bearbeiten |
-| `G` / `B` | Abschnitt: Gerade/Ecke oder Bogen/Wende |
+| `G` / `B` / `K` | Abschnitt: Gerade/Ecke, Bogen durch Punkt oder Kurve nach Winkel |
+| `W` | Wende in einem Zug (Kurve mit 200 gon) |
 | `Esc` / `Enter` | Fahrlinie beenden (zuerst wird Unfertiges verworfen) |
 | `M` | Maßstab setzen |
 | `⌫` / `Entf` / `Strg+Z` | letzten Punkt zurück |

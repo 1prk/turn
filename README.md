@@ -69,11 +69,26 @@ Voreinstellungen (Maße in m, Überhang hinten und Radstand beziehen sich bei me
 | LKW | 9,22 | 5,17 | 1,36 | 2,69 | 2,30 | 9,46 | 46,9 gon |
 | Müllfahrzeug 3-achsig | 9,90 | 4,77 | 1,53 | 3,60 | 2,55 | 10,25 | 38,9 gon |
 | Müllfahrzeug 3-achsig Nachlaufachse | 9,95 | 3,90 | 1,35 | 4,70 | 2,55 | 8,60 | 39,1 gon |
+| Gelenkbus 3-achsig (18 m) | 18,00 | 5,90 | 2,70 | 9,40 (ab Mittelachse) | 2,55 | 11,40 | 48,4 gon |
 
 Die Fahrzeuge mit drei Achsen werden mit drei Achsen gezeichnet. Die Hinterachse im Modell ist die Mitte der beiden
 hinteren Achsen. Der **Abstand der Hinterachsen** (1,35 m) ist eine Annahme und wirkt nur auf die Darstellung, nicht
 auf die Berechnung. Bei der Nachlaufachse lenkt die hinterste Achse in der Darstellung gegen. Die Berechnung benutzt
 nur Radstand, Überhänge, Breite und Wendekreis. Spurweite und Lenkübersetzung sind ebenfalls Annahmen (Darstellung).
+
+## Gelenkfahrzeuge (Gelenkbus)
+Ein Fahrzeug mit Haken „Gelenkfahrzeug“ hat zwei Karosserien. Die vordere Karosserie ist das Fahrzeug wie bisher
+(Vorderachse gelenkt, Mittelachse als Hinterachse des Modells). Am **Gelenkpunkt**, 1,79 m hinter der Mittelachse,
+hängt die hintere Karosserie. Ihre Hinterachse liegt 4,21 m hinter dem Gelenk und folgt dem Gelenkpunkt starr (Traktrix).
+Der **Faltenbalg** wird dunkel gezeichnet und gehört zur überstrichenen Fläche. Die Hüllkurven laufen an den vorderen
+Ecken der vorderen und den hinteren Ecken der hinteren Karosserie.
+- Der **Knickwinkel** (Winkel zwischen den Karosserien) wird berechnet und angezeigt. Der **Grenzwert** (Voreinstellung
+  65 gon) ist **kein Herstellerwert**. Bei den Maßen der Zeichnung braucht der Wendekreis von 11,40 m bei vollem Einschlag
+  63,0 gon (56,7°). Ein Grenzwert von 45° wäre dafür zu klein. Bitte den echten Wert eintragen.
+- Eine Fahrkurve, die den Grenzwert überschreitet, ist nicht möglich: Die Vorschau wird begrenzt, bestehende Punkte
+  werden bei zu kleinem Grenzwert als ungültig markiert.
+- Die Wende in einem Zug (Taste W) braucht beim Gelenkbus mindestens 2 · R = 17,13 m Platz in der Breite.
+- Eigene Gelenkfahrzeuge: Fahrzeug kopieren (+), Haken „Gelenkfahrzeug“, Maße eintragen.
 
 ## Fahrkurven
 Wie bei den Fahrzeugen gibt es in Abschnitt 4 eine Liste von **Fahrkurven** mit **+**. Jede Fahrkurve hat eigene Punkte

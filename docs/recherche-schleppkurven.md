@@ -62,7 +62,30 @@ Quelle: Online-Hilfe [AutoTURN Pro 2024](https://onlinehelp.transoftsolutions.co
 - Der Wendekreis ist nur eine Kenngröße bei maximalem Lenkeinschlag. Die Schleppkurve umfasst die ganze überstrichene
   Fläche, von der äußersten Vorderecke bis zum innersten Hinterrad.
 
-## 5. Anwendung in dieser Anwendung
+## 5. Gelenkbus (Fahrzeug mit Gelenk)
+
+Die Suchen liefern wieder nur Zusammenfassungen. Die Seiten selbst waren nicht abrufbar.
+
+| Befund | Quelle | Verlässlichkeit |
+|---|---|---|
+| Ein 18-m-Gelenkbus hat laut Infoportal mobil.nrw einen Radstand von **5,2–5,9 m und 6,0–6,8 m** und einen **Wendekreis von 23,0–23,1 m** (Durchmesser), je nach Konfiguration. Das ergibt einen Außenradius von etwa 11,5 m. Die Angabe 11,4 m passt dazu. | [mobil.nrw](https://infoportal.mobil.nrw/technik/bussemitkonventionellemantrieb/gelenkbus.html) | mittel |
+| PathSweeper nennt für 18 m Länge 17,95 m, 2,55 m Breite, Radstand 5,8 + 6,2 m, Wendekreis 22 m und den Kraftkreis nach § 32d StVZO mit 12,50 m. | [PathSweeper](https://pathsweeper.com/de/guides/rbsv-2020-bemessungsfahrzeuge) | niedrig |
+| Eine Schweizer Richtlinie definiert den Wendekreis als das Doppelte des Außenradius des äußersten Karosserieteils. | Typenplan Tiefbauamt Basel-Landschaft | mittel |
+| Kinematik: Eine Hinterachse oder die Achse einer zweiten Karosserie folgt als **Traktrix** (starre Verbindung, keine Querbewegung). Das gilt als exakt für jede Bahn und für Vor- und Rückwärtsfahrt. Ein Gelenkbus lässt sich als zwei Karosserien mit Gelenkpunkt modellieren. Der Gelenkpunkt liegt außerhalb der Achse (Off-Axle-Hitch). | [Swept path analysis based on GPS data](https://www.researchgate.net/publication/325208877_Vehicle_swept_path_analysis_based_on_GPS_data), [Modular Kinematic Modelling of Articulated Buses](https://www.researchgate.net/publication/341892020_Modular_Kinematic_Modelling_of_Articulated_Buses), [ASCE 1995](https://doi.org/10.1061/(ASCE)0733-947X(1995)121:1(63)) | mittel (Kurzfassungen) |
+| Der **maximale Knickwinkel** hängt von der Konstruktion ab. Die Software A-Null/AKG nennt 45° als Standardwert des Assistenten. Ein Herstellerwert für einen 18-m-Gelenkbus fehlt in den Ergebnissen. | [AKG Fahrzeugeditor](https://www.akgsoftware.de/docs/de/infravision/b58/bcad/webhelp/topics/strasse_r_schleppkurve_fahrzeugeditor_befehle_abmessungen.html) | niedrig |
+
+**Eigene Rechnung (im Selbsttest bestätigt):** Mit den Maßen aus der Zeichnung ergibt der Wendekreis von 11,4 m bei vollem
+Einschlag einen **Knickwinkel von 56,7° (63,0 gon)**. Der Radius der Mittelachse ist 6,21 m, der des Gelenks 6,46 m und
+der der Hinterachse 4,90 m. Der Standardwert 45° wäre für diesen Wendekreis zu klein. Der Grenzwert in der Anwendung
+steht deshalb auf 65 gon. Das ist kein Herstellerwert, sondern etwas mehr als der Winkel, den der Wendekreis braucht.
+**Bitte den echten Grenzwert des Fahrzeugs eintragen.**
+
+**Maße der Zeichnung (18,00 m):** 2,70 m vorn, 5,90 m bis zur Mittelachse, 1,79 m bis zum Gelenk, 4,21 m bis zur
+Hinterachse (6,00 m Mittel- bis Hinterachse), 3,40 m Überhang hinten. Breite 2,55 m. Die Angaben in der Nachricht
+(„vorn 2,8“, „hinten 8,4“) passen nicht zur Gesamtlänge von 18 m. Mit 2,8 m und 8,4 m ergäben sich 17,1 m. Die
+Zeichnung ist stimmig (Summe 18,00 m) und ist deshalb die Grundlage.
+
+## 6. Anwendung in dieser Anwendung
 
 | Befund | Umsetzung |
 |---|---|
@@ -73,3 +96,4 @@ Quelle: Online-Hilfe [AutoTURN Pro 2024](https://onlinehelp.transoftsolutions.co
 | Fahrweise 1: Einschlag während der Fahrt, tangential, Außenradius = Wendekreis. | Unverändert. Der Einschlag ergibt sich aus dem Nachlaufen der Hinterachse. |
 | Fahrweise 2 (Einschlag im Stand). | Noch nicht umgesetzt. Nächster Schritt. |
 | Hüllkurve, Sicherheitsabstand. | Hüllkurve aus den vier Karosserieecken. Ein Sicherheitsabstand fehlt noch. |
+| Gelenkbus: zwei Karosserien, Traktrix der hinteren Achse, Knickwinkel-Grenze. | **Gelenkfahrzeug** mit Gelenkpunkt, zweiter Karosserie, Faltenbalg und Grenzwert für den Knickwinkel. Eine Fahrkurve, die den Grenzwert überschreitet, ist nicht möglich. |

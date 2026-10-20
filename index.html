@@ -72,6 +72,10 @@
       <button data-tool="drive" title="Taste F">Fahrlinie (F)</button>
       <button data-tool="view" title="Taste Esc">Beenden (Esc)</button>
     </div>
+    <div class="row">Nächster Abschnitt:
+      <button data-seg="line" title="Taste G: Gerade bis zum Punkt, an Ecken entsteht ein Bogen">Gerade / Ecke (G)</button>
+      <button data-seg="arc" title="Taste B: Kreisbogen durch den Punkt, für Wenden in einem Zug">Bogen / Wende (B)</button>
+    </div>
     <div class="row">
       <button id="driveUndo" title="Rücktaste oder Strg+Z">Letzten Punkt zurück</button>
       <button id="driveReset">Fahrt neu starten</button>
@@ -89,6 +93,8 @@
     <h2>Tastenkürzel</h2>
     <div class="keys">
       <kbd>F</kbd><span>Fahrlinie bearbeiten</span>
+      <kbd>G</kbd><span>Abschnitt: Gerade / Ecke</span>
+      <kbd>B</kbd><span>Abschnitt: Bogen / Wende in einem Zug</span>
       <kbd>Esc</kbd><span>Fahrlinie beenden (erst Unfertiges verwerfen)</span>
       <kbd>M</kbd><span>Maßstab setzen</span>
       <kbd>⌫</kbd><span>letzten Punkt zurück (auch <kbd>Strg</kbd>+<kbd>Z</kbd>)</span>

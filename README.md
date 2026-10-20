@@ -17,10 +17,25 @@ Browserbasierte Prüfung von Schleppkurven auf einem PDF-Lageplan. Kein Server, 
    gezeichnet, die übrigen Punkte sind rot markiert.
 4. Ergebnis: Hüllfläche, Eckspuren, Silhouetten, Lenkrad-Anzeige. Fahrzeug per Regler oder „Abspielen“ bewegen.
 
+**Alle Winkel in der Oberfläche sind in gon** (400 gon = Vollkreis, 100 gon = rechter Winkel): Lenkwinkel, Limit,
+Lenkrad, Drehung der Bögen, Richtungsänderung.
+
+## Wende in einem Zug
+Zwei Arten von Abschnitten, umschaltbar mit **G** (Gerade / Ecke) und **B** (Bogen / Wende):
+- **Gerade / Ecke:** Gerade bis zum Punkt. Zwischen zwei Geraden entsteht ein tangentialer Bogen (Ecke).
+  Eine Ecke von fast 200 gon geht nicht, denn die Ausrundung bräuchte unendlich lange Geraden.
+- **Bogen / Wende:** ein Kreisbogen, der am letzten Punkt tangential zur Fahrtrichtung beginnt und durch den Punkt
+  an der Maus geht (Raute). Der Radius ergibt sich aus der Geometrie. Liegt der Punkt gegenüber (Fahrbahnbreite ≥ 2 ·
+  Radius), entsteht ein Halbkreis (200 gon). Liegt er hinten seitlich, dreht das Fahrzeug mehr als 200 gon.
+  Liegt der Punkt innerhalb des Mindestwendekreises, wird er nach außen auf den kleinsten möglichen Bogen begrenzt.
+  Eine Gerade nach einem Bogen führt tangential geradeaus aus dem Bogen heraus (Punkte daneben werden auf diese Linie
+  gelegt).
+
 ## Tastenkürzel
 | Taste | Funktion |
 |---|---|
 | `F` | Fahrlinie bearbeiten |
+| `G` / `B` | Abschnitt: Gerade/Ecke oder Bogen/Wende |
 | `Esc` / `Enter` | Fahrlinie beenden (zuerst wird Unfertiges verworfen) |
 | `M` | Maßstab setzen |
 | `⌫` / `Entf` / `Strg+Z` | letzten Punkt zurück |
@@ -34,7 +49,7 @@ Browserbasierte Prüfung von Schleppkurven auf einem PDF-Lageplan. Kein Server, 
 Oben in Abschnitt 3 stehen die Fahrzeuge als Reiter. Mit **+** entsteht eine Kopie des gewählten Fahrzeugs unter neuem
 Namen. Eigene Fahrzeuge lassen sich löschen. Alle Fahrzeuge und Änderungen bleiben im Browser (localStorage) erhalten.
 Voreinstellungen: **PKW** und **LKW** (Radstand 5,17 m, Überhang 1,36 m / 2,69 m, Breite 2,30 m, Wendekreis außen
-9,46 m, Lenkübersetzung 20 → max. Lenkwinkel ≈ 42,2°).
+9,46 m, Lenkübersetzung 20 → max. Lenkwinkel ≈ 46,9 gon).
 
 ## Schleppkurve und Leitlinie
 Die Vorderräder werden auf der Leitlinie geführt. Sie besteht aus Geraden und Kreisbögen, an denen ein Punkt des
@@ -50,14 +65,14 @@ ein und mit stetig abnehmendem Einschlag aus. Dieser Einschlag ergibt sich aus d
 - **Radius:** so groß, wie die Geraden es erlauben. Je weiter die Punkte auseinander liegen, desto größer die Kurve.
   Jede Gerade gibt die Hälfte ihrer freien Länge an jeden der beiden Bögen an ihren Enden.
 - **Untergrenze:** Der Radius der Vorderachsmitte ist nie kleiner als beim Wendekreis (voller Einschlag,
-  ≈ 4,54 m bei den PKW-Daten, max. Lenkwinkel ≈ 39,1°, Lenkrad ≈ 508° bei Übersetzung 13).
+  ≈ 4,54 m bei den PKW-Daten, max. Lenkwinkel ≈ 43,4 gon, Lenkrad ≈ 565 gon bei Übersetzung 13).
 - Ist eine Strecke für den Mindestradius zu kurz oder wäre der Lenkwinkel über dem Limit, wird der Punkt nicht
   übernommen.
 - Orange auf dem Weg = Lenkung am Anschlag.
 
 ## PKW (Voreinstellung)
 Länge 4,88 m · Radstand 2,86 m · Überhang vorn 0,92 m / hinten 1,10 m · Breite 1,89 m (ohne Spiegel) ·
-Wendekreisradius außen 5,85 m (äußerste Karosserieecke bei Vollausschlag) → max. Lenkwinkel ≈ 39,1°.
+Wendekreisradius außen 5,85 m (äußerste Karosserieecke bei Vollausschlag) → max. Lenkwinkel ≈ 43,4 gon.
 
 ## Modell
 Kinematisches Einspurmodell, die Hinterachse folgt zwangsgeführt. Nur Vorwärtsfahrt. Der Button „Kinematik prüfen“ führt Selbsttests aus

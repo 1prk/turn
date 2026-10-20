@@ -7,10 +7,18 @@ Browserbasierte Prüfung von Schleppkurven auf einem PDF-Lageplan. Kein Server, 
 1. **PDF laden** (Datei wählen oder per Drag & Drop) oder „Leere Fläche (Test)“.
 2. **Maßstab**: zwei Punkte auf eine bekannte Strecke klicken, Länge in m eingeben. Das Bild lässt sich jederzeit
    mit der linken Maustaste ziehen (ein Klick ohne Bewegung setzt einen Punkt), Zoom per Mausrad.
-3. **Fahrweise 1**: Startpunkt der Vorderachsmitte klicken, zweiter Klick setzt die Fahrtrichtung. Danach zeigt eine
-   **Live-Vorschau**, wie das Fahrzeug zur Maus fährt. Ein Klick übernimmt das Ziel (nur wenn erreichbar).
-   Ziele sind ziehbar (Rechtsklick löscht, Rückschritt nimmt das letzte zurück).
+3. **Fahrweise 1** (Leitlinie): Eckpunkte der Leitlinie der Vorderachsmitte klicken. 1. Klick = Start, 2. Klick = erste
+   Gerade (gibt die Fahrtrichtung vor). An jedem Eckpunkt fügt die Seite automatisch eine Kurve ein, die **vor** dem
+   Eckpunkt beginnt. Die **Live-Vorschau** zeigt das Fahrzeug immer an der Maus. Ein Klick wird nur übernommen, wenn die
+   Strecken lang genug für die Kurven sind (sonst orange/rot mit Meldung). Punkte sind ziehbar (Rechtsklick löscht,
+   Rückschritt nimmt den letzten zurück).
 4. Ergebnis: Hüllfläche, Eckspuren, Silhouetten, Lenkrad-Anzeige. Fahrzeug per Regler oder „Abspielen“ bewegen.
+
+## Schleppkurve und Leitlinie
+Die Vorderräder werden auf der Leitlinie geführt. Sie besteht aus Geraden und Kreisbögen, an denen ein Punkt des
+Fahrzeugs (hier die Vorderachsmitte) entlangfährt. Die Hinterachse läuft zwangsgeführt auf einer nach innen
+nachlaufenden Schleppkurve. Das ergibt die sichelförmige Verbreiterung der überstrichenen Fläche. Hüllkurven sind die
+Spuren der vier Karosserieecken. Die Radien unterschreiten den Mindestwendekreis nie, weil der Lenkwinkel hart begrenzt ist.
 
 ## Fahrweise 1
 Der Lenkradeinschlag erfolgt während der Fahrt mit geringer Geschwindigkeit. Der Fahrer fährt mit stetig zunehmendem
@@ -18,8 +26,7 @@ Lenkeinschlag in den Kreisbogen ein und verlässt ihn mit stetig abnehmendem Len
 eingeschlagen, der Außenradius entspricht dem Wendekreisradius des Fahrzeugs.
 - Lenkwinkel nie über dem Maximum aus dem Wendekreis (≈ 39,1°, Lenkrad ≈ 508° bei Übersetzung 13).
 - Lenkwinkeländerung nie über 20°/m Fahrstrecke (einstellbar).
-- Pro Ziel: erst eine Kurve (ein-, Bogen, aus), danach geradeaus zum Ziel. Die Kurve beginnt am letzten Ziel.
-  Ist die Kurve für Vollausschlag zu klein, wird nur bis zu einem kleineren Lenkwinkel eingeschlagen.
+- Ist die Ablenkung an einer Ecke zu klein für Vollausschlag, wird nur bis zu einem kleineren Lenkwinkel eingeschlagen.
 - Orange auf dem Weg = Lenkung am Anschlag.
 
 ## Fahrzeug (Voreinstellung PKW)

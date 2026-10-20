@@ -19,9 +19,25 @@
     tool: 'scale',
     zoom: 1, ox: 0, oy: 0,              // view: screen = plan * zoom + offset
     pos: 0, playing: false,
+    valid: 0,                           // number of corner points that the vehicle can drive
     mouse: null, res: null
   };
-  const veh = Object.assign({}, Sim.DEFAULT_VEHICLE);
+
+  /* ---------- vehicles ---------- */
+  const STORE = 'schleppkurve.vehicles.v1';
+  const FIELDS = { v_wb: 'wb', v_front: 'front', v_rear: 'rear', v_width: 'width', v_rout: 'rOuter', v_track: 'track', v_ratio: 'ratio' };
+  let vehicles = Sim.PRESETS.map((v) => Object.assign({}, v)), selIdx = 0;
+  try {      // the browser can block the storage: the page works without it
+    const saved = JSON.parse(localStorage.getItem(STORE));
+    if (saved && Array.isArray(saved.list) && saved.list.length) {
+      vehicles = saved.list.map((v) => Object.assign({}, Sim.PRESETS[0], v));
+      selIdx = Math.min(Math.max(0, saved.sel | 0), vehicles.length - 1);
+    }
+  } catch (err) { /* use the preset vehicles */ }
+  let veh = vehicles[selIdx];
+  function saveVehicles() {
+    try { localStorage.setItem(STORE, JSON.stringify({ list: vehicles, sel: selIdx })); } catch (err) { /* no storage */ }
+  }
   let pdfDoc = null, spaceDown = false, drag = null, lastClick = { t: 0, x: 0, y: 0 };
 
   /* ---------- view helpers ---------- */
@@ -110,10 +126,16 @@
 
   /* ---------- calculation ---------- */
   function recompute() {
-    S.res = null; S.prev = null;
-    const lim = Sim.steerLimit(veh);
+    S.res = null; S.prev = null; S.valid = S.wps.length;
+    const lim = Sim.steerLimit(veh), o = Sim.driveOpts(veh);
     if (S.mpp && S.start && lim) {
-      const run = Sim.buildRoute(routeM(null), veh, Sim.driveOpts(veh));
+      // Draw only the part of the route that the vehicle can drive. A point after a line that is too short is not valid.
+      const pts = routeM(null);
+      for (let k = 2; k <= S.wps.length; k++) {
+        const r = Sim.buildRoute(pts.slice(0, k + 1), veh, o, { checkOnly: true });
+        if (r.fail) { S.valid = k - 1; break; }
+      }
+      const run = Sim.buildRoute(pts.slice(0, S.valid + 1), veh, o);
       S.res = analyse(run.smp, lim);
       S.res.lim = lim; S.res.fail = run.fail;
     }
@@ -126,17 +148,21 @@
     return pts.map((q) => ({ x: q.x * S.mpp, y: q.y * S.mpp }));
   }
 
+  function routeOk() { return !!S.res && !S.res.fail && S.valid === S.wps.length; }
+
   /* Calculate the live preview: the guide line with the mouse as the next corner point.
-   * The vehicle is always shown. If a straight line is too short for a turn, the preview is not usable. */
+   * The mouse point is limited, so that the route can always be driven: the preview shows
+   * how far the vehicle can go. The vehicle is always shown. */
   function updatePreview() {
     S.prev = null;
     const R = S.res;
-    if (R && S.tool === 'drive' && S.mouse && !drag) {
-      const run = Sim.buildRoute(routeM(S.mouse), veh, Sim.driveOpts(veh));
-      S.prev = analyse(run.smp, R.lim);
-      S.prev.fail = run.fail; S.prev.ok = !run.fail; S.prev.end = run.smp[run.smp.length - 1];
-      // Show the normal hint again after an error message.
-      if (S.prev.ok && $('hint').dataset.err) { $('hint').textContent = HINTS[S.tool]; delete $('hint').dataset.err; }
+    if (R && S.tool === 'drive' && S.mouse && !drag && S.valid === S.wps.length) {
+      const m = S.mpp, o = Sim.driveOpts(veh);
+      const lt = Sim.limitTarget(routeM(null), { x: S.mouse.x * m, y: S.mouse.y * m }, veh, o);
+      S.prev = analyse(lt.run.smp, R.lim);
+      S.prev.fail = lt.run.fail; S.prev.ok = !lt.run.fail; S.prev.clamped = lt.clamped;
+      S.prev.target = { x: lt.pt.x / m, y: lt.pt.y / m };
+      S.prev.end = lt.run.smp[lt.run.smp.length - 1];
     }
     updateInfo();
     requestDraw();
@@ -211,12 +237,13 @@
       rows.push(['Lenkrad max.', f(deg(R.maxD) * veh.ratio, 0) + '° von ' + f(deg(R.lim.delta) * veh.ratio, 0) + '°']);
       rows.push(['Lenkung am Anschlag', R.satLen > 0.01 ? '<span class="warn">' + f(R.satLen, 1) + ' m</span>' : 'nein']);
       if (R.fail) rows.push(['Leitlinie', '<span class="bad">' + failShort(R.fail) + '</span>']);
+      if (S.valid < S.wps.length) rows.push(['Ungültige Punkte', '<span class="bad">ab Punkt ' + (S.valid + 1) + ' (Strecke zu kurz)</span>']);
       const q = R.smp[sampleIndex()];
       rows.push(['Position ' + f(q.s, 1) + ' m', 'Lenkwinkel ' + f(deg(q.d), 1) + '°']);
     }
     if (P) {
-      rows.push(['Vorschau', P.ok ? '<span class="good">fahrbar</span>'
-        : '<span class="bad">' + failShort(P.fail) + '</span>']);
+      rows.push(['Vorschau', !P.ok ? '<span class="bad">' + failShort(P.fail) + '</span>'
+        : P.clamped ? '<span class="warn">begrenzt: weiter geht es nicht</span>' : '<span class="good">fahrbar</span>']);
       rows.push(['Vorschau: Lenkwinkel max.', f(deg(P.maxD), 1) + '° (Lenkrad ' + f(deg(P.maxD) * veh.ratio, 0) + '°)']);
     }
     $('res').innerHTML = rows.map((r) => '<span>' + r[0] + '</span><b>' + r[1] + '</b>').join('');
@@ -294,7 +321,7 @@
     ctx.save();
     ctx.scale(k, k);
     // With a preview, the preview shows the whole route. Without it, the fixed route is shown.
-    const A = P || R, ok = P ? P.ok : !R.fail;
+    const A = P || R, ok = P ? (P.ok && !P.clamped) : !R.fail;
     if ($('oSweep').checked) { ctx.fillStyle = ok ? (P ? 'rgba(22,163,74,.20)' : 'rgba(40,110,220,.22)') : 'rgba(217,70,20,.25)'; ctx.fill(A.sweep); }
     ctx.lineWidth = um; ctx.strokeStyle = ok ? (P ? 'rgba(21,128,61,.9)' : 'rgba(20,70,170,.9)') : 'rgba(194,65,12,.9)'; ctx.stroke(A.trails);
     if ($('oSil').checked) { ctx.strokeStyle = 'rgba(30,40,60,.5)'; ctx.stroke(A.sil); }
@@ -334,14 +361,24 @@
       ctx.fillStyle = fill; ctx.fill(); ctx.lineWidth = 1.5 * px; ctx.strokeStyle = '#111'; ctx.stroke();
     };
     if (S.start) {      // the straight lines of the guide line, with corner points
-      const pts = [S.start.p].concat(S.wps);
-      if (S.tool === 'drive' && S.mouse) pts.push(S.mouse);
+      const pts = [S.start.p].concat(S.wps.slice(0, S.valid));
+      if (S.prev) pts.push(S.prev.target);
       ctx.save(); ctx.setLineDash([6 * px, 5 * px]); ctx.lineWidth = px; ctx.strokeStyle = '#7c3aed';
-      strokePts(pts); ctx.stroke(); ctx.restore();
+      strokePts(pts); ctx.stroke();
+      if (S.valid < S.wps.length) {       // points that are not valid: grey line, red points
+        ctx.strokeStyle = '#9ca3af'; strokePts(S.wps.slice(Math.max(0, S.valid - 1))); ctx.stroke();
+      }
+      ctx.restore();
       dot(S.start.p, '#16a34a');
     }
     S.wps.forEach((p, i) => {
-      dot(p, '#fff');
+      const bad = i >= S.valid;
+      dot(p, bad ? '#fecaca' : '#fff');
+      if (bad) {
+        ctx.strokeStyle = '#d92d20'; ctx.lineWidth = 2 * px; ctx.beginPath();
+        ctx.moveTo(p.x - 4 * px, p.y - 4 * px); ctx.lineTo(p.x + 4 * px, p.y + 4 * px);
+        ctx.moveTo(p.x + 4 * px, p.y - 4 * px); ctx.lineTo(p.x - 4 * px, p.y + 4 * px); ctx.stroke();
+      }
       ctx.fillStyle = '#111'; ctx.font = 11 * px + 'px system-ui,sans-serif';
       ctx.fillText(String(i + 1), p.x + 7 * px, p.y - 7 * px);
     });
@@ -354,7 +391,11 @@
         ctx.save(); ctx.scale(1 / S.mpp, 1 / S.mpp); drawVehicle(st, px * S.mpp, 0.7); ctx.restore();
       }
     } else if (S.mouse) {
-      const bad = S.prev && !S.prev.ok;
+      const bad = S.prev && (!S.prev.ok || S.prev.clamped);
+      if (S.prev && S.prev.clamped) {      // the mouse point is not possible: show the limited point
+        ctx.save(); ctx.setLineDash([3 * px, 3 * px]); ctx.strokeStyle = '#c2410c'; ctx.lineWidth = px;
+        ctx.beginPath(); ctx.moveTo(S.prev.target.x, S.prev.target.y); ctx.lineTo(S.mouse.x, S.mouse.y); ctx.stroke(); ctx.restore();
+      }
       ctx.strokeStyle = bad ? '#c2410c' : '#15803d'; ctx.lineWidth = 2 * px;
       ctx.beginPath(); ctx.arc(S.mouse.x, S.mouse.y, 7 * px, 0, 7);
       ctx.moveTo(S.mouse.x - 11 * px, S.mouse.y); ctx.lineTo(S.mouse.x + 11 * px, S.mouse.y);
@@ -396,15 +437,17 @@
   /* ---------- tools and input ---------- */
   const HINTS = {
     scale: 'Maßstab: Zwei Punkte auf eine Strecke mit bekannter Länge klicken (Bemaßung, Fahrbahnbreite). Danach die Länge in m eingeben. Plan verschieben: mit der linken Maustaste ziehen. Zoom: Mausrad. Esc bricht ab.',
-    drive: 'Fahrweise 1: Klicke die Eckpunkte der Leitlinie der Vorderachsmitte. 1. Klick = Start, 2. Klick = erste Gerade und Fahrtrichtung. An jedem Eckpunkt entsteht automatisch ein Kreisbogen, der tangential an die Geraden anschließt (kein Knick). Je weiter die Punkte auseinander liegen, desto größer wird der Bogen. Der Radius unterschreitet nie den Wendekreis. Die Vorschau zeigt live das Fahrzeug an der Maus. Ein Klick wird nur übernommen, wenn die Strecken für die Kurven lang genug sind (sonst orange). Punkte ziehen = verschieben, Rechtsklick = löschen, Rückschritt = letzten Punkt zurück. Plan verschieben: ins Leere ziehen.'
+    drive: 'Fahrweise 1: Klicke die Eckpunkte der Leitlinie der Vorderachsmitte. 1. Klick = Start, 2. Klick = erste Gerade und Fahrtrichtung. An jedem Eckpunkt entsteht automatisch ein tangentialer Kreisbogen. Je weiter die Punkte auseinander liegen, desto größer der Bogen. Die Vorschau zeigt live, wie weit das Fahrzeug kommt: Ist der Punkt an der Maus nicht fahrbar, wird er auf den größtmöglichen Wert begrenzt (orange). Esc = Fahrlinie beenden.',
+    view: 'Ansicht: Die Fahrlinie ist beendet. F = Fahrlinie weiter bearbeiten, M = Maßstab. Plan verschieben: ziehen.'
   };
 
   function setTool(t) {
     S.tool = t;
     document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === t));
-    $('hint').textContent = HINTS[t];
-    cv.style.cursor = 'crosshair';
-    updateInfo(); requestDraw();
+    $('hint').textContent = HINTS[t]; delete $('hint').dataset.err;
+    cv.style.cursor = t === 'view' ? 'default' : 'crosshair';
+    if (t !== 'drive') { S.mouse = null; S.pend = null; }
+    updatePreview();
   }
 
   /* Find the target under the mouse. Return -2 for the start and -1 for no hit. */
@@ -454,9 +497,10 @@
           S.pend = null; S.pos = 1; $('pos').value = 1000; recompute();
         }
       } else if (S.prev && S.prev.ok) {
-        S.wps.push(p); S.pos = 1; $('pos').value = 1000; recompute();
+        // The point of the preview is set. It is the mouse point or, if the mouse point is not possible, the limited point.
+        S.wps.push(S.prev.target); S.pos = 1; $('pos').value = 1000; recompute();
       } else {
-        $('hint').textContent = S.prev ? failText(S.prev.fail) + ' Wähle den Punkt weiter weg.' : 'Dieser Punkt ist nicht fahrbar.';
+        $('hint').textContent = S.prev ? failText(S.prev.fail) : 'Zuerst die ungültigen Punkte entfernen (Rückschritt).';
         $('hint').dataset.err = '1';
       }
     }
@@ -469,7 +513,9 @@
     const pan = { sx: sp.x, sy: sp.y, ox: S.ox, oy: S.oy };
     if (e.button === 1 || spaceDown) { drag = Object.assign({ type: 'pan' }, pan); return; }
     const i = S.tool === 'drive' && e.button === 0 ? hitWp(sp) : -1;
-    if (i !== -1) drag = { type: i === -2 ? 'start' : 'wp', i: i };     // move a target
+    if (i !== -1) {      // move a point; if the route is then not possible, the point goes back
+      drag = { type: i === -2 ? 'start' : 'wp', i: i, okBefore: routeOk(), orig: i === -2 ? S.start.p : S.wps[i] };
+    }
     else drag = Object.assign({ type: 'maybe', button: e.button, p: p }, pan);
   });
 
@@ -496,6 +542,12 @@
     drag = null;
     cv.style.cursor = 'crosshair';
     if (d && d.type === 'maybe') clickAt({ x: d.sx, y: d.sy }, d.p, d.button);
+    if (d && (d.type === 'wp' || d.type === 'start') && d.okBefore && !routeOk()) {
+      if (d.type === 'wp') S.wps[d.i] = d.orig; else S.start.p = d.orig;
+      $('hint').textContent = 'Dieser Punkt ist dort nicht möglich: Die Strecken wären zu kurz für die Kurven. Der Punkt ist zurückgesprungen.';
+      $('hint').dataset.err = '1';
+      recompute();
+    }
     updatePreview();
   });
   cv.addEventListener('pointerleave', () => { if (!drag) { S.mouse = null; updatePreview(); } });
@@ -508,19 +560,46 @@
     requestDraw();
   }, { passive: false });
 
+  /* Keys. Space (hold) moves the plan. The other keys are in the list in the sidebar. */
   window.addEventListener('keydown', (e) => {
-    if (/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
-    if (e.code === 'Space') { spaceDown = true; if (e.target === document.body) e.preventDefault(); }
-    else if (e.key === 'Escape') {
-      S.pend = null; if (!S.scaleDone) S.scalePts = [];
+    if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    if (e.code === 'Space') { spaceDown = true; if (e.target === document.body) e.preventDefault(); return; }
+    const k = e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); undoPoint(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (k === 'escape' || k === 'enter') {
+      // First step: remove what is not finished. Next step: end the tool.
+      if (S.tool === 'drive' && S.pend) S.pend = null;
+      else if (S.tool === 'scale' && !S.scaleDone && S.scalePts.length) S.scalePts = [];
+      else if (S.tool !== 'view') setTool('view');
       requestDraw();
-    } else if (e.key === 'Backspace') {
-      if (S.tool === 'scale' && !S.scaleDone) S.scalePts.pop();
-      else if (S.tool === 'drive') { if (S.pend) S.pend = null; else if (S.start) removeWp(); recompute(); }
-      requestDraw();
-    }
+    } else if (k === 'backspace' || k === 'delete') { e.preventDefault(); undoPoint(); }
+    else if (k === 'f') setTool('drive');
+    else if (k === 'm') setTool('scale');
+    else if (k === 'p') $('play').click();
+    else if (k === '0' || k === 'home') fitView();
+    else if (k === '+' || k === '=') zoomBy(1.25);
+    else if (k === '-') zoomBy(0.8);
+    else if (/^[1-9]$/.test(k) && vehicles[+k - 1]) selectVehicle(+k - 1);
   });
   window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; });
+
+  /* Undo the last point of the unfinished work. */
+  function undoPoint() {
+    if (S.tool === 'scale' && !S.scaleDone) { S.scalePts.pop(); requestDraw(); }
+    else if (S.pend) { S.pend = null; requestDraw(); }
+    else if (S.start) removeWp();
+  }
+
+  function zoomBy(factor) {
+    const r = cv.getBoundingClientRect(), cx = r.width / 2, cy = r.height / 2, p = s2p(cx, cy);
+    S.zoom = Math.min(80, Math.max(0.02, S.zoom * factor));
+    S.ox = cx - p.x * S.zoom; S.oy = cy - p.y * S.zoom;
+    requestDraw();
+  }
+
+  // A button must not keep the focus. Otherwise the space key would press it again.
+  document.addEventListener('click', (e) => { if (e.target.tagName === 'BUTTON') e.target.blur(); });
 
   /* ---------- controls ---------- */
   document.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
@@ -539,12 +618,57 @@
   ['oSweep', 'oSil'].forEach((id) => $(id).addEventListener('change', requestDraw));
   $('silStep').addEventListener('change', recompute);
 
-  const FIELDS = { v_wb: 'wb', v_front: 'front', v_rear: 'rear', v_width: 'width', v_rout: 'rOuter', v_track: 'track', v_ratio: 'ratio' };
+  /* ---------- vehicle list ---------- */
+  function renderVehicles() {
+    const box = $('vehList');
+    box.innerHTML = '';
+    vehicles.forEach((v, i) => {
+      const b = document.createElement('button');
+      b.className = 'chip' + (i === selIdx ? ' active' : '');
+      b.textContent = (i < 9 ? (i + 1) + ' · ' : '') + v.name;
+      b.title = 'Fahrzeug wählen' + (i < 9 ? ' (Taste ' + (i + 1) + ')' : '');
+      b.addEventListener('click', () => selectVehicle(i));
+      box.appendChild(b);
+    });
+    const add = document.createElement('button');
+    add.className = 'chip'; add.textContent = '+'; add.title = 'Neues Fahrzeug anlegen (Kopie des gewählten)';
+    add.addEventListener('click', addVehicle);
+    box.appendChild(add);
+    $('vehDel').style.display = veh.preset ? 'none' : '';
+    $('vehReset').style.display = veh.preset ? '' : 'none';
+  }
+
+  function refreshFields() {
+    $('v_name').value = veh.name;
+    Object.keys(FIELDS).forEach((id) => { $(id).value = veh[FIELDS[id]]; });
+  }
+
+  function selectVehicle(i) {
+    selIdx = i; veh = vehicles[i];
+    refreshFields(); renderVehicles(); saveVehicles(); recompute();
+  }
+
+  function addVehicle() {
+    const name = prompt('Name des neuen Fahrzeugs (Kopie von „' + veh.name + '“):', 'Fahrzeug ' + (vehicles.length + 1));
+    if (name == null || !name.trim()) return;
+    vehicles.push(Object.assign({}, veh, { name: name.trim(), preset: false }));
+    selectVehicle(vehicles.length - 1);
+  }
+
+  $('vehDel').addEventListener('click', () => {
+    if (veh.preset || !confirm('Fahrzeug „' + veh.name + '“ löschen?')) return;
+    vehicles.splice(selIdx, 1);
+    selectVehicle(Math.max(0, selIdx - 1));
+  });
+  $('vehReset').addEventListener('click', () => {
+    const base = Sim.PRESETS.find((v) => v.name === veh.name);
+    if (base) { Object.assign(veh, base); refreshFields(); saveVehicles(); recompute(); }
+  });
+  $('v_name').addEventListener('input', () => { veh.name = $('v_name').value || 'Fahrzeug'; renderVehicles(); saveVehicles(); });
   Object.keys(FIELDS).forEach((id) => {
-    $(id).value = veh[FIELDS[id]];
     $(id).addEventListener('input', () => {
       const v = parseFloat($(id).value);
-      if (v > 0) { veh[FIELDS[id]] = v; recompute(); }
+      if (v > 0) { veh[FIELDS[id]] = v; saveVehicles(); recompute(); }
     });
   });
 
@@ -595,6 +719,7 @@
   });
 
   window.addEventListener('resize', resize);
-  window.Turn = { S: S, veh: veh, recompute: recompute, finishScale: finishScale, setTool: setTool, updatePreview: updatePreview };
+  window.Turn = { S: S, get veh() { return veh; }, vehicles: vehicles, selectVehicle: selectVehicle, recompute: recompute, finishScale: finishScale, setTool: setTool, updatePreview: updatePreview };
+  refreshFields(); renderVehicles();
   resize(); setTool('scale'); updateInfo();
 })();

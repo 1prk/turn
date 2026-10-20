@@ -147,37 +147,92 @@
   Sim.driveOpts = function (v) {
     const lim = Sim.steerLimit(v);
     if (!lim) return null;
-    return { step: 0.05, dMax: lim.delta, rate: v.rateDeg * Math.PI / 180, rFront: lim.rFront, tol: 0.1 };
+    return { step: 0.05, dMax: lim.delta, rate: v.rateDeg * Math.PI / 180, tol: 0.1 };
   };
 
-  /* Drive the vehicle from state st until the front axle center reaches target T.
-   * The driver points the front wheels at the target. Two limits apply:
-   * the steering angle cannot be more than dMax, and it can change only by rate per meter.
-   * Only forward travel is possible. The steering angle in st is the first steering angle.
-   * Return the new samples and a flag. If the target is not reachable, the samples
-   * end at the point that is closest to the target. */
-  Sim.driveTo = function (st, T, v, o) {
-    const wb = v.wb, step = o.step, rs = o.rate * step;
-    let Rx = st.Rx, Ry = st.Ry, th = st.th, d = st.d, s = st.s;
-    const dist0 = hyp(T.x - st.Fx, T.y - st.Fy);
-    if (dist0 < o.tol) return { samples: [], reached: true };
-    const cap = Math.min(150, 2 * dist0 + 3 * Math.PI * o.rFront + 10);
-    const out = [];
-    let best = Infinity, bestI = -1, reached = false;
-    for (let travelled = 0; travelled < cap; travelled += step) {
-      const Fx = Rx + wb * Math.cos(th), Fy = Ry + wb * Math.sin(th);
-      const want = clamp(normAngle(Math.atan2(T.y - Fy, T.x - Fx) - th), -o.dMax, o.dMax);
-      d += clamp(want - d, -rs, rs);
-      const dth = Math.tan(d) / wb * step, am = th + dth / 2;
-      Rx += step * Math.cos(am); Ry += step * Math.sin(am); th += dth; s += step;
-      const smp = Sim.sample(v, Rx, Ry, th, d, s);
-      out.push(smp);
-      const dist = hyp(T.x - smp.Fx, T.y - smp.Fy);
-      if (dist < best) { best = dist; bestI = out.length - 1; }
-      if (dist < o.tol) { reached = true; break; }
+  /* Driving style 1: the driver changes the steering angle while the vehicle moves slowly.
+   * He enters the circular arc with a steadily increasing steering angle and leaves it
+   * with a steadily decreasing steering angle. In the arc, the steering is at full lock,
+   * so the outer radius is equal to the minimum turning circle of the vehicle.
+   * The steering angle changes by "rate" per meter of travel.
+   *
+   * Description of one turn for a heading change "delta" (radians, positive):
+   *   ramp = travel length of one steering ramp, arc = travel length at full lock,
+   *   peak = highest steering angle. If delta is too small for full lock, peak is smaller
+   *   and there is no arc. */
+  function turnProfile(o, wb, delta) {
+    // Heading change of one full ramp: integral of tan(rate * s) / wb
+    const hr = -Math.log(Math.cos(o.dMax)) / (o.rate * wb);
+    if (delta >= 2 * hr) return { peak: o.dMax, ramp: o.dMax / o.rate, arc: (delta - 2 * hr) * wb / Math.tan(o.dMax) };
+    const peak = Math.acos(Math.exp(-delta * o.rate * wb / 2));
+    return { peak: peak, ramp: peak / o.rate, arc: 0 };
+  }
+
+  function turnSteer(p, s) {
+    const len = 2 * p.ramp + p.arc;
+    if (s <= 0 || s >= len) return 0;
+    if (s < p.ramp) return p.peak * s / p.ramp;
+    if (s < p.ramp + p.arc) return p.peak;
+    return p.peak * (len - s) / p.ramp;
+  }
+
+  /* Drive one turn from state st. sign is +1 or -1 (turn direction). Push the samples to out. */
+  function simulateTurn(st, sign, delta, v, o, out) {
+    if (delta < 1e-9) return st;
+    const p = turnProfile(o, v.wb, delta), len = 2 * p.ramp + p.arc;
+    const n = Math.max(1, Math.ceil(len / o.step)), ds = len / n;
+    let Rx = st.Rx, Ry = st.Ry, th = st.th;
+    for (let i = 0; i < n; i++) {
+      const dth = Math.tan(sign * turnSteer(p, (i + 0.5) * ds)) / v.wb * ds, am = th + dth / 2;
+      Rx += ds * Math.cos(am); Ry += ds * Math.sin(am); th += dth;
+      if (out) out.push(Sim.sample(v, Rx, Ry, th, sign * turnSteer(p, (i + 1) * ds), st.s + (i + 1) * ds));
     }
-    if (!reached) out.length = bestI + 1;
-    return { samples: out, reached: reached };
+    return Sim.sample(v, Rx, Ry, th, 0, st.s + len);
+  }
+
+  /* Drive from state st to target T (center of the front axle) in driving style 1:
+   * first one turn (steering in, arc, steering out), then straight to T.
+   * The smallest heading change is used, so that T is on the line of the final heading.
+   * Only forward travel is possible. If T is not reachable (for example, T is inside the
+   * turning circle), the result has reached = false and no samples. */
+  Sim.driveTo = function (st, T, v, o) {
+    const wb = v.wb, dx = T.x - st.Fx, dy = T.y - st.Fy;
+    if (hyp(dx, dy) < o.tol) return { samples: [], reached: true };
+    const c = Math.cos(st.th), sn = Math.sin(st.th);
+    const f0 = c * dy - sn * dx, ahead = c * dx + sn * dy;
+    const out = [];
+    let end = st;
+    if (!(Math.abs(f0) < 1e-6 && ahead > 0)) {
+      const sign = f0 >= 0 ? 1 : -1;
+      // g > 0: T is on the turn side of the final heading. g = 0: T is on the line of the final heading.
+      const g = (delta) => {
+        const e = simulateTurn(st, sign, delta, v, o, null);
+        const wx = T.x - e.Fx, wy = T.y - e.Fy, ce = Math.cos(e.th), se = Math.sin(e.th);
+        return { g: sign * (ce * wy - se * wx), dot: ce * wx + se * wy };
+      };
+      const dStep = Math.PI / 180, dMaxTurn = 3 * Math.PI;
+      let lo = 0, hi = -1, prev = g(0);
+      for (let delta = dStep; delta <= dMaxTurn; delta += dStep) {
+        const cur = g(delta);
+        if (prev.g >= 0 && cur.g <= 0 && cur.dot > 0) { hi = delta; break; }
+        prev = cur; lo = delta;
+      }
+      if (hi < 0) return { samples: [], reached: false };
+      for (let k = 0; k < 40; k++) {
+        const mid = (lo + hi) / 2;
+        if (g(mid).g > 0) lo = mid; else hi = mid;
+      }
+      end = simulateTurn(st, sign, hi, v, o, out);
+    }
+    // Straight part to the target
+    const wx = T.x - end.Fx, wy = T.y - end.Fy;
+    const len = Math.cos(end.th) * wx + Math.sin(end.th) * wy;
+    const n = Math.max(0, Math.ceil(len / o.step));
+    for (let i = 1; i <= n; i++) {
+      const ds = len * i / n;
+      out.push(Sim.sample(v, end.Rx + ds * Math.cos(end.th), end.Ry + ds * Math.sin(end.th), end.th, 0, end.s + ds));
+    }
+    return { samples: out, reached: true };
   };
 
   /* Drive through all targets in order. Stop at the first target that is not reachable.
@@ -205,27 +260,6 @@
   Sim.bodyPoly = function (smp, v) {
     const hw = v.width / 2, xf = v.wb + v.front, xr = -v.rear;
     return [Sim.local(smp, xf, -hw), Sim.local(smp, xf, hw), Sim.local(smp, xr, hw), Sim.local(smp, xr, -hw)];
-  };
-
-  function segInt(a, b, c, d) {
-    const o = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
-    const d1 = o(a, b, c), d2 = o(a, b, d), d3 = o(c, d, a), d4 = o(c, d, b);
-    return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
-  }
-  function inPoly(p, poly) {
-    let inside = false;
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const a = poly[i], b = poly[j];
-      if ((a.y > p.y) !== (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
-    }
-    return inside;
-  }
-  Sim.polysIntersect = function (A, B) {
-    for (let i = 0; i < A.length; i++) {
-      const a1 = A[i], a2 = A[(i + 1) % A.length];
-      for (let j = 0; j < B.length; j++) if (segInt(a1, a2, B[j], B[(j + 1) % B.length])) return true;
-    }
-    return inPoly(A[0], B) || inPoly(B[0], A);
   };
 
   /* Find the scale (meters per unit u) from a polyline in unit u and its real length in meters. */
@@ -266,27 +300,41 @@
     const m = Sim.scaleFromPolyline([{ x: 0, y: 0 }, { x: 30, y: 0 }, { x: 30, y: 40 }], 10);
     add('Maßstab: Linienzug 70 pt = 10 m', Math.abs(m - 10 / 70) < 1e-12, (1 / m).toFixed(2) + ' pt/m');
 
-    // Drive tests: limits for the steering angle and for its rate must hold.
+    // Drive tests for driving style 1: limits for the steering angle and for its rate must hold.
     const o = Sim.driveOpts(v), st0 = Sim.startState(v, { x: 0, y: 0 }, 0);
     const ahead = Sim.driveTo(st0, { x: 10, y: 0 }, v, o);
-    add('Fahren: Ziel geradeaus erreichbar, Lenkwinkel 0',
+    add('Fahrweise 1: Ziel geradeaus erreichbar, Lenkwinkel 0',
       ahead.reached && ahead.samples.every((q) => Math.abs(q.d) < 1e-9), '');
-    const side = Sim.driveTo(st0, { x: 2, y: 1.5 }, v, o);
-    add('Fahren: Ziel innerhalb des Wendekreises ist nicht erreichbar', !side.reached, '');
-    const uturn = Sim.driveAll(st0, [{ x: 8, y: 0 }, { x: 4, y: 12 }, { x: -6, y: 8 }], v, o);
-    let worstD = 0, worstRate = 0;
-    uturn.smp.forEach((q, i) => {
-      worstD = Math.max(worstD, Math.abs(q.d));
-      if (i) worstRate = Math.max(worstRate, Math.abs(q.d - uturn.smp[i - 1].d) / o.step);
-    });
-    add('Fahren: Mehrpunkt-Fahrt erreicht alle Ziele', !uturn.fail && uturn.wpIdx.length === 3, '');
-    add('Fahren: Lenkwinkel nie über Limit', worstD <= o.dMax + 1e-9, (worstD * 180 / Math.PI).toFixed(2) + '°');
-    add('Fahren: Lenkgeschwindigkeit nie über Limit', worstRate <= o.rate + 1e-9, (worstRate * 180 / Math.PI).toFixed(1) + '°/m');
+    const inside = Sim.driveTo(st0, { x: 1, y: 3 }, v, o);
+    add('Fahrweise 1: Ziel innerhalb des Wendekreises ist nicht erreichbar', !inside.reached, '');
 
-    const sq = [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 }];
-    const sh = (dx) => sq.map(p => ({ x: p.x + dx, y: p.y }));
-    add('Kollisionstest', Sim.polysIntersect(sq, sh(1.5)) && !Sim.polysIntersect(sq, sh(2.5)) &&
-      Sim.polysIntersect(sq, [{ x: .5, y: .5 }, { x: 1, y: .5 }, { x: 1, y: 1 }]), '');
+    const T1 = { x: 14, y: 12 };
+    const turn = Sim.driveTo(st0, T1, v, o);
+    const tEnd = turn.samples[turn.samples.length - 1];
+    add('Fahrweise 1: Ziel wird auf 1 mm genau erreicht', turn.reached && hyp(tEnd.Fx - T1.x, tEnd.Fy - T1.y) < 0.001,
+      turn.reached ? (hyp(tEnd.Fx - T1.x, tEnd.Fy - T1.y) * 1000).toFixed(2) + ' mm' : '');
+    const run2 = Sim.driveAll(st0, [{ x: 8, y: 0 }, { x: 18, y: 12 }, { x: 18, y: 30 }, { x: 6, y: 40 }], v, o);
+    let worstD = 0, worstRate = 0, jump = 0;
+    run2.smp.forEach((q, i) => {
+      worstD = Math.max(worstD, Math.abs(q.d));
+      if (i) { worstRate = Math.max(worstRate, Math.abs(q.d - run2.smp[i - 1].d) / (q.s - run2.smp[i - 1].s)); }
+      if (i) jump = Math.max(jump, hyp(q.Rx - run2.smp[i - 1].Rx, q.Ry - run2.smp[i - 1].Ry));
+    });
+    add('Fahrweise 1: Mehrpunkt-Fahrt erreicht alle Ziele', !run2.fail && run2.wpIdx.length === 4, '');
+    add('Fahrweise 1: Lenkwinkel nie über Limit', worstD <= o.dMax + 1e-9, (worstD * 180 / Math.PI).toFixed(2) + '°');
+    add('Fahrweise 1: Lenkgeschwindigkeit nie über Limit', worstRate <= o.rate + 1e-6, (worstRate * 180 / Math.PI).toFixed(1) + '°/m');
+    add('Fahrweise 1: Weg ohne Sprünge', jump < 0.0501, 'max. Schritt ' + (jump * 1000).toFixed(1) + ' mm');
+    // In a large turn, the arc is at full lock and the outer body corner is on the turning circle.
+    let outer = 0;
+    const big = Sim.driveTo(st0, { x: -4, y: 12 }, v, o);   // heading change of more than 90 degrees
+    const arc = big.samples.filter((q) => Math.abs(q.d) >= o.dMax - 1e-9);
+    if (arc.length) {
+      const q = arc[Math.floor(arc.length / 2)];
+      const rr = lim.rRear, cx = q.Rx - rr * Math.sin(q.th), cy = q.Ry + rr * Math.cos(q.th);   // circle center (left turn)
+      for (const a of arc) for (const k of Sim.bodyPoly(a, v)) outer = Math.max(outer, hyp(k.x - cx, k.y - cy));
+    }
+    add('Fahrweise 1: Bogen bei Vollausschlag, Außenradius = Wendekreis ' + v.rOuter + ' m',
+      arc.length > 20 && Math.abs(outer - v.rOuter) < 0.02, 'gemessen ' + outer.toFixed(3) + ' m, ' + (arc.length * o.step).toFixed(1) + ' m Bogen');
     return res;
   };
 

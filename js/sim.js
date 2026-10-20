@@ -176,6 +176,11 @@
    *            It goes through the new point. The radius comes from the points.
    *            With this arc, the vehicle can turn around in one movement (more than 200 gon).
    *            A line after an arc continues straight in the end direction of the arc.
+   *   'turn' = a circular arc with a given radius R and a given change of direction sweep.
+   *            It has no point of its own: { t: 'turn', sweep, R }. The sweep is in radians.
+   *            It is positive when the vehicle turns toward the positive angle. R = 0 means the minimum turning circle.
+   *            The turn starts at the end of the route, tangential to the direction there.
+   *            A line after a turn continues straight in the end direction of the turn.
    *
    * Build the route from the points pts.
    * Each point is { x, y, t }. The value t is 'line' or 'arc'.
@@ -193,18 +198,22 @@
    *             Otherwise it is null.
    *   arcs    = the arcs at the corner points between two lines.
    *             arcs[index of the point] = { R, t, delta }.
+   *   ends    = the end of each part. ends[index in the input] = { x, y }. It is useful for a turn, which has no point.
    *   end     = { x, y, h } = the end of the guide line and its direction.
    * The function also makes samples when the vehicle cannot drive the route.
    * The user sees the vehicle at all times.
    * With opt.checkOnly, the vehicle does not move. The result has no samples. */
   Sim.buildRoute = function (pts, v, o, opt) {
-    const P = [];
-    for (const p of pts) {
-      if (!P.length) P.push({ x: p.x, y: p.y, t: 'line' });
-      else if (hyp(p.x - P[P.length - 1].x, p.y - P[P.length - 1].y) > 1e-6) P.push({ x: p.x, y: p.y, t: p.t === 'arc' ? 'arc' : 'line' });
+    const P = [];                            // src = the index of the point in the input.
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      if (!P.length) P.push({ x: p.x, y: p.y, t: 'line', src: i });
+      else if (p.t === 'turn') P.push({ x: NaN, y: NaN, t: 'turn', sweep: p.sweep, R: p.R, src: i });
+      else if (P[P.length - 1].t === 'turn' || hyp(p.x - P[P.length - 1].x, p.y - P[P.length - 1].y) > 1e-6) P.push({ x: p.x, y: p.y, t: p.t === 'arc' ? 'arc' : 'line', src: i });
     }
-    if (P.length < 2) return { smp: [Sim.startState(v, P[0], 0)], fail: null, lastArc: null, end: { x: P[0].x, y: P[0].y, h: 0 } };
-    P[1].t = 'line';                         // The first line gives the direction.
+    while (P.length > 1 && P[1].t === 'turn') P.splice(1, 1);      // The first part must be a line. It gives the direction.
+    if (P.length < 2) return { smp: [Sim.startState(v, P[0], 0)], fail: null, lastArc: null, arcs: [], ends: [], end: { x: P[0].x, y: P[0].y, h: 0 } };
+    P[1].t = 'line';
 
     const path = [{ x: P[0].x, y: P[0].y }];      // The guide line of the center of the front axle.
     const line = (T) => {
@@ -215,7 +224,26 @@
     let pose = { x: P[0].x, y: P[0].y, h: Math.atan2(P[1].y - P[0].y, P[1].x - P[0].x) };
     let forced = false, fail = null, lastArc = null;      // forced = true when an arc before sets the direction.
     const arcs = [];                                      // The arc at each corner point: arcs[index of the point] = { R, t, delta }.
+    const ends = [];                                      // The end of each part: ends[index in the input] = { x, y }.
     const setFail = (f) => { if (!fail) fail = f; };
+
+    // Make a turn from the pose. The turn has the radius R and the change of direction sweep (positive or negative).
+    // It starts tangential to the direction of the vehicle. The line after it continues in the end direction.
+    const doTurn = (j) => {
+      const e = P[j], sweep = e.sweep, aa = Math.abs(sweep);
+      lastArc = null;
+      forced = true;
+      if (!(aa > 1e-6)) { ends[e.src] = { x: pose.x, y: pose.y }; return; }
+      const R = e.R > 0 ? e.R : o.rFront, sign = sweep > 0 ? 1 : -1;
+      if (R < o.rFront - 1e-6) setFail({ kind: 'radius', R: R, rMin: o.rFront });
+      const C = { x: pose.x - sign * R * Math.sin(pose.h), y: pose.y + sign * R * Math.cos(pose.h) };
+      const phi0 = Math.atan2(pose.y - C.y, pose.x - C.x), m = Math.max(1, Math.ceil(R * aa / o.step));
+      for (let i = 1; i <= m; i++) path.push({ x: C.x + R * Math.cos(phi0 + sweep * i / m), y: C.y + R * Math.sin(phi0 + sweep * i / m) });
+      const last = path[path.length - 1];
+      pose = { x: last.x, y: last.y, h: pose.h + sweep };
+      ends[e.src] = { x: last.x, y: last.y };
+      lastArc = { R: R, delta: sweep };
+    };
 
     // Make an arc from the pose through the point P[j].
     const doArc = (j) => {
@@ -223,6 +251,7 @@
       const alpha = normAngle(Math.atan2(dy, dx) - pose.h), aa = Math.abs(alpha);
       lastArc = null;
       forced = true;
+      ends[M.src] = { x: M.x, y: M.y };
       if (aa < 1e-4) { line(M); pose = { x: M.x, y: M.y, h: pose.h }; return; }                   // Straight on.
       if (Math.PI - aa < 0.05) {                                                                  // The point is right behind the vehicle.
         setFail({ kind: 'radius', R: Infinity, rMin: o.rFront });
@@ -235,6 +264,7 @@
       for (let i = 1; i < m; i++) path.push({ x: C.x + R * Math.cos(phi0 + sweep * i / m), y: C.y + R * Math.sin(phi0 + sweep * i / m) });
       path.push({ x: M.x, y: M.y });
       pose = { x: M.x, y: M.y, h: pose.h + sweep };
+      ends[M.src] = { x: M.x, y: M.y };
       lastArc = { R: R, delta: sweep };
     };
 
@@ -242,7 +272,7 @@
     const doRun = (j, k) => {
       lastArc = null;
       const Q = [{ x: pose.x, y: pose.y }], idx = [j - 1];
-      for (let i = j; i <= k; i++) { Q.push(P[i]); idx.push(i); }
+      for (let i = j; i <= k; i++) { Q.push(P[i]); idx.push(i); ends[P[i].src] = { x: P[i].x, y: P[i].y }; }
       if (forced) {          // After an arc, the first line goes in the end direction of the arc.
         const ux = Math.cos(pose.h), uy = Math.sin(pose.h);
         const l = Math.max(0.05, (Q[1].x - Q[0].x) * ux + (Q[1].y - Q[0].y) * uy);
@@ -292,17 +322,40 @@
     let j = 1;
     while (j < P.length) {
       if (P[j].t === 'arc') { doArc(j); j++; continue; }
+      if (P[j].t === 'turn') { doTurn(j); j++; continue; }
       let k = j;
       while (k + 1 < P.length && P[k + 1].t === 'line') k++;
       doRun(j, k);
       j = k + 1;
     }
-    if (opt && opt.checkOnly) return { fail: fail, lastArc: lastArc, arcs: arcs, end: pose };
+    if (opt && opt.checkOnly) return { fail: fail, lastArc: lastArc, arcs: arcs, ends: ends, end: pose };
     const smp = Sim.run(path, v);
     let maxD = 0;
     for (const q of smp) maxD = Math.max(maxD, Math.abs(q.d));
     if (!fail && maxD > o.dMax + 0.01) fail = { kind: 'steer', maxD: maxD };
-    return { smp: smp, fail: fail, lastArc: lastArc, arcs: arcs, end: pose };
+    return { smp: smp, fail: fail, lastArc: lastArc, arcs: arcs, ends: ends, end: pose };
+  };
+
+  /* Make a turn for the end of a route. This is the "turn by angle" of the driving style 1.
+   * It is the same as a turn template of the RBSV: the vehicle drives an arc with a radius and a change
+   * of direction. A turn with 200 gon is a turn around in one movement.
+   * P = the points of the existing route (in meters, with the types as for Sim.buildRoute).
+   * side = +1 or -1 (the turn direction). sweepAbs = the change of direction in radians (more than 0).
+   * Rreq = the radius in meters, or 0 (use the minimum turning circle).
+   * The radius is never smaller than the minimum turning circle. If the steering would be more than the limit,
+   * the function makes the radius larger.
+   * Return { el, clamped, run }: the new part of the route, a flag, and the route that Sim.buildRoute makes for it. */
+  Sim.makeTurn = function (P, side, sweepAbs, Rreq, v, o) {
+    let R = Rreq > 0 ? Rreq : o.rFront, clamped = false, grown = false;
+    if (R < o.rFront) { R = o.rFront; clamped = true; }
+    let el, run;
+    for (let k = 0; k < 40; k++) {
+      el = { t: 'turn', sweep: side * sweepAbs, R: Rreq > 0 || grown ? R : 0 };
+      run = Sim.buildRoute(P.concat([el]), v, o);
+      if (!run.fail) break;
+      R *= 1.05; clamped = true; grown = true;           // The steering is more than the limit. Make the radius larger.
+    }
+    return { el: el, clamped: clamped, run: run };
   };
 
   /* Limit a new point M. The vehicle must be able to drive the route to M.
@@ -321,7 +374,9 @@
    * Return { pt, clamped, run }. These are the new point, a flag, and the route that Sim.buildRoute makes for it. */
   Sim.limitTarget = function (P, M, mode, v, o) {
     const make = (pt) => Sim.buildRoute(P.concat([{ x: pt.x, y: pt.y, t: mode }]), v, o);
-    const V = Sim.buildRoute(P, v, o, { checkOnly: true }).end;      // The end of the guide line: position and direction.
+    const base = Sim.buildRoute(P, v, o, { checkOnly: true });
+    const V = base.end;                                              // The end of the guide line: position and direction.
+    const at = (i) => base.ends[i] || P[i];                          // The position of the end of part i.
     const dx = M.x - V.x, dy = M.y - V.y, dist = hyp(dx, dy);
     let clamped = false, pt, run;
     if (mode === 'arc') {
@@ -339,17 +394,17 @@
       }
       return { pt: pt, clamped: clamped, run: run };
     }
-    if (P.length >= 3 && P[P.length - 1].t === 'arc') {
+    if (P.length >= 3 && (P[P.length - 1].t === 'arc' || P[P.length - 1].t === 'turn')) {
       const ux = Math.cos(V.h), uy = Math.sin(V.h), along = dx * ux + dy * uy;
       if (along < 0 || Math.abs(-dx * uy + dy * ux) > 0.02) clamped = true;
       const l = Math.max(0, along);
       pt = { x: V.x + l * ux, y: V.y + l * uy };
       return { pt: pt, clamped: clamped, run: make(pt) };
     }
-    const U = P[P.length - 2], thIn = V.h, lenIn = hyp(V.x - U.x, V.y - U.y);
+    const U = at(P.length - 2), thIn = V.h, lenIn = hyp(V.x - U.x, V.y - U.y);
     let free = lenIn;                                  // The free length of the line before V.
-    if (P.length >= 3 && U.t !== 'arc') {              // There is a corner at U. It needs a part of the line.
-      const W = P[P.length - 3], dlU = normAngle(thIn - Math.atan2(U.y - W.y, U.x - W.x));
+    if (P.length >= 3 && P[P.length - 2].t !== 'arc' && P[P.length - 2].t !== 'turn') {      // There is a corner at U. It needs a part of the line.
+      const W = at(P.length - 3), dlU = normAngle(thIn - Math.atan2(U.y - W.y, U.x - W.x));
       if (Math.PI - Math.abs(dlU) < 0.02) free = -Infinity;
       else if (Math.abs(dlU) >= 1e-3) free -= o.rFront * Math.tan(Math.abs(dlU) / 2);
     }
@@ -532,6 +587,56 @@
     // More than 200 gon. The point is behind the vehicle and to the side.
     const loop = Sim.buildRoute([pt(0, 0), pt(20, 0), arcPt(10, 12)], v, o);
     add('Wende: mehr als 200 gon in einem Zug', !loop.fail && loop.lastArc && Math.abs(loop.lastArc.delta) > Math.PI, loop.lastArc ? 'Drehung ' + Sim.gon(loop.lastArc.delta).toFixed(1) + ' gon' : '');
+
+    // Turn by angle (the turn template of the RBSV, the corner path of AutoTURN).
+    // A turn with 200 gon is a turn around in one movement. The radius is the minimum turning circle.
+    for (const veh2 of Sim.PRESETS) {
+      const o2 = Sim.driveOpts(veh2);
+      const t200 = Sim.makeTurn([pt(0, 0), pt(20, 0)], 1, Math.PI, 0, veh2, o2), e2 = t200.run.end;
+      add(veh2.name + ': Wende mit 200 gon in einem Zug, Endpunkt auf 1 mm genau',
+        !t200.run.fail && hyp(e2.x - 20, e2.y - 2 * o2.rFront) < 0.001 && Math.abs(e2.h - Math.PI) < 1e-6,
+        'Querversatz 2R = ' + (2 * o2.rFront).toFixed(2) + ' m');
+      // The center of the arc is at (20, rFront). In the middle of the turn, the outer front corner is on the turning circle.
+      let outerT = 0, dT = 0;
+      for (const q of t200.run.smp) {
+        dT = Math.max(dT, Math.abs(q.d));
+        if (q.th > 1.3 && q.th < 2.0) for (const k of Sim.bodyPoly(q, veh2)) outerT = Math.max(outerT, hyp(k.x - 20, k.y - o2.rFront));
+      }
+      add(veh2.name + ': Wende mit 200 gon, Außenradius = Wendekreis ' + veh2.rOuter + ' m, Lenkung am Anschlag',
+        Math.abs(outerT - veh2.rOuter) < 0.03 && dT <= o2.dMax + 0.01 && dT >= o2.dMax - 0.03,
+        'gemessen ' + outerT.toFixed(2) + ' m, Lenkwinkel ' + Sim.gon(dT).toFixed(1) + ' gon');
+    }
+    // A radius that is smaller than the minimum turning circle is not possible. The function makes it equal to the minimum.
+    const tSmall = Sim.makeTurn([pt(0, 0), pt(20, 0)], -1, Math.PI / 2, 2, v, o);
+    add('Kurve nach Winkel: ein Radius unter dem Wendekreis wird auf den Mindestradius begrenzt',
+      tSmall.clamped && !tSmall.run.fail && tSmall.run.lastArc.R >= o.rFront - 1e-9, 'R = ' + tSmall.run.lastArc.R.toFixed(2) + ' m');
+    // Random turns: both vehicles, 40 to 390 gon, both sides, minimum radius or a larger radius, with other parts before and after.
+    let badT = 0, jumpT = 0, totalT = 0;
+    for (const veh2 of Sim.PRESETS) {
+      const o2 = Sim.driveOpts(veh2);
+      for (let r = 0; r < 40; r++) {
+        let route = [pt(0, 0), pt(15 + rnd() * 30, 0)];
+        if (rnd() < 0.5) {           // Sometimes there is a corner or an arc before the turn.
+          const e0 = Sim.buildRoute(route, veh2, o2, { checkOnly: true }).end;
+          const firstMode = rnd() < 0.5 ? 'arc' : 'line';
+          const first = Sim.limitTarget(route, pt(e0.x + rnd() * 80 - 20, e0.y + rnd() * 80 - 40), firstMode, veh2, o2);
+          route = route.concat([{ x: first.pt.x, y: first.pt.y, t: firstMode }]);
+        }
+        const sweep = (40 + rnd() * 350) * Math.PI / 200, side = rnd() < 0.5 ? 1 : -1;
+        const tt = Sim.makeTurn(route, side, sweep, rnd() < 0.5 ? 0 : o2.rFront * (0.5 + rnd() * 3), veh2, o2);
+        const e1 = tt.run.end, after = Sim.buildRoute(route.concat([tt.el, pt(e1.x + 15 * Math.cos(e1.h) + 3, e1.y + 15 * Math.sin(e1.h))]), veh2, o2);
+        totalT++;
+        if (tt.run.fail || after.fail || tt.run.lastArc.R < o2.rFront - 1e-9) badT++;
+        let m = 0, hmax = 0;
+        for (let i = 1; i < after.smp.length; i++) {
+          m = Math.max(m, hyp(after.smp[i].Rx - after.smp[i - 1].Rx, after.smp[i].Ry - after.smp[i - 1].Ry));
+          hmax = Math.max(hmax, Math.abs(normAngle(after.smp[i].th - after.smp[i - 1].th)));
+        }
+        if (m > 0.0502 || hmax > 0.06) jumpT++;
+      }
+    }
+    add('Kurve nach Winkel (40 bis 390 gon, beide Seiten, beide Fahrzeuge): alle Routen fahrbar, ohne Sprünge', badT === 0 && jumpT === 0,
+      totalT + ' Kurven, ' + badT + ' nicht fahrbar, ' + jumpT + ' Sprünge');
 
     // Limited points of both kinds in random order. The vehicle can drive each route, and the route has no jumps.
     let badMix = 0, jumpMix = 0, clampMix = 0, totalMix = 0, bigTurn = 0;

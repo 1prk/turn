@@ -8,9 +8,9 @@ Browserbasierte Prüfung von Schleppkurven auf einem PDF-Lageplan. Kein Server, 
 2. **Maßstab**: zwei Punkte auf eine bekannte Strecke klicken, Länge in m eingeben. Das Bild lässt sich jederzeit
    mit der linken Maustaste ziehen (ein Klick ohne Bewegung setzt einen Punkt), Zoom per Mausrad.
 3. **Fahrweise 1** (Leitlinie): Eckpunkte der Leitlinie der Vorderachsmitte klicken. 1. Klick = Start, 2. Klick = erste
-   Gerade (gibt die Fahrtrichtung vor). An jedem Eckpunkt fügt die Seite automatisch eine Kurve ein, die **vor** dem
-   Eckpunkt beginnt. Die **Live-Vorschau** zeigt das Fahrzeug immer an der Maus. Ein Klick wird nur übernommen, wenn die
-   Strecken lang genug für die Kurven sind (sonst orange/rot mit Meldung). Punkte sind ziehbar (Rechtsklick löscht,
+   Gerade (gibt die Fahrtrichtung vor). An jedem Eckpunkt entsteht automatisch ein Kreisbogen, der tangential an die
+   Geraden anschließt. Die **Live-Vorschau** zeigt das Fahrzeug immer an der Maus. Ein Klick wird nur übernommen, wenn die
+   Strecken lang genug für die Kurven sind (sonst orange mit Meldung). Punkte sind ziehbar (Rechtsklick löscht,
    Rückschritt nimmt den letzten zurück).
 4. Ergebnis: Hüllfläche, Eckspuren, Silhouetten, Lenkrad-Anzeige. Fahrzeug per Regler oder „Abspielen“ bewegen.
 
@@ -18,15 +18,19 @@ Browserbasierte Prüfung von Schleppkurven auf einem PDF-Lageplan. Kein Server, 
 Die Vorderräder werden auf der Leitlinie geführt. Sie besteht aus Geraden und Kreisbögen, an denen ein Punkt des
 Fahrzeugs (hier die Vorderachsmitte) entlangfährt. Die Hinterachse läuft zwangsgeführt auf einer nach innen
 nachlaufenden Schleppkurve. Das ergibt die sichelförmige Verbreiterung der überstrichenen Fläche. Hüllkurven sind die
-Spuren der vier Karosserieecken. Die Radien unterschreiten den Mindestwendekreis nie, weil der Lenkwinkel hart begrenzt ist.
+Spuren der vier Karosserieecken.
 
 ## Fahrweise 1
-Der Lenkradeinschlag erfolgt während der Fahrt mit geringer Geschwindigkeit. Der Fahrer fährt mit stetig zunehmendem
-Lenkeinschlag in den Kreisbogen ein und verlässt ihn mit stetig abnehmendem Lenkeinschlag. Im Bogen ist voll
-eingeschlagen, der Außenradius entspricht dem Wendekreisradius des Fahrzeugs.
-- Lenkwinkel nie über dem Maximum aus dem Wendekreis (≈ 39,1°, Lenkrad ≈ 508° bei Übersetzung 13).
-- Lenkwinkeländerung nie über 20°/m Fahrstrecke (einstellbar).
-- Ist die Ablenkung an einer Ecke zu klein für Vollausschlag, wird nur bis zu einem kleineren Lenkwinkel eingeschlagen.
+Der Lenkradeinschlag erfolgt während der Fahrt. Geraden und Kreisbögen schließen tangential aneinander an, an den
+Übergängen entsteht kein Knick. Die Übergangsbögen sind wegen der schnellen Lenkwinkeländerung bei geringer
+Geschwindigkeit vernachlässigbar klein und werden nicht modelliert. Der Fahrer lenkt mit stetig zunehmendem Einschlag
+ein und mit stetig abnehmendem Einschlag aus. Dieser Einschlag ergibt sich aus dem Nachlaufen der Hinterachse.
+- **Radius:** so groß, wie die Geraden es erlauben. Je weiter die Punkte auseinander liegen, desto größer die Kurve.
+  Jede Gerade gibt die Hälfte ihrer freien Länge an jeden der beiden Bögen an ihren Enden.
+- **Untergrenze:** Der Radius der Vorderachsmitte ist nie kleiner als beim Wendekreis (voller Einschlag,
+  ≈ 4,54 m bei den PKW-Daten, max. Lenkwinkel ≈ 39,1°, Lenkrad ≈ 508° bei Übersetzung 13).
+- Ist eine Strecke für den Mindestradius zu kurz oder wäre der Lenkwinkel über dem Limit, wird der Punkt nicht
+  übernommen.
 - Orange auf dem Weg = Lenkung am Anschlag.
 
 ## Fahrzeug (Voreinstellung PKW)
@@ -35,7 +39,7 @@ Wendekreisradius außen 5,85 m (äußerste Karosserieecke bei Vollausschlag) →
 
 ## Modell
 Kinematisches Einspurmodell, die Hinterachse folgt zwangsgeführt. Nur Vorwärtsfahrt. Der Button „Kinematik prüfen“ führt Selbsttests aus
-(Kreisfahrt, Wendekreis, Geradeausfahrt, Maßstab, Fahrweise 1); auch per `node -e "require('./js/sim.js').selfTest()"`.
+(Kreisfahrt, Wendekreis, Geradeausfahrt, Maßstab, Fahrweise 1: Tangentialität, Mindestradius, Radius wächst mit Abstand); auch per `node -e "require('./js/sim.js').selfTest()"`.
 
 ## Aufbau
 - `index.html` – Oberfläche

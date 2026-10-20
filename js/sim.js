@@ -15,7 +15,6 @@
     width: 1.89,   // width without mirrors
     rOuter: 5.85,  // outer turning radius: outermost body corner at full lock
     track: 1.60,   // track width: used only to draw the wheels
-    rateDeg: 20,   // maximum change of the steering angle per meter of travel [deg/m]
     ratio: 13      // steering ratio: steering wheel angle divided by road wheel angle
   };
 
@@ -132,8 +131,6 @@
     return out;
   };
 
-  function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
-
   Sim.sample = function (v, Rx, Ry, th, d, s) {
     return { s: s, Rx: Rx, Ry: Ry, th: th, d: d, Fx: Rx + v.wb * Math.cos(th), Fy: Ry + v.wb * Math.sin(th) };
   };
@@ -143,119 +140,99 @@
     return Sim.sample(v, F.x - v.wb * Math.cos(th), F.y - v.wb * Math.sin(th), th, 0, 0);
   };
 
-  /* Limits for the drive simulation. Return null if the vehicle data are not valid. */
+  /* Limits for the drive simulation. Return null if the vehicle data are not valid.
+   * rFront = smallest radius for the center of the front axle (the vehicle is at full lock).
+   * rMax = largest radius that is used for an arc of the guide line. */
   Sim.driveOpts = function (v) {
     const lim = Sim.steerLimit(v);
     if (!lim) return null;
-    return { step: 0.05, dMax: lim.delta, rate: v.rateDeg * Math.PI / 180, tol: 0.1 };
+    return { step: 0.05, dMax: lim.delta, rFront: lim.rFront, rMax: 200 };
   };
 
-  /* Driving style 1: the driver changes the steering angle while the vehicle moves slowly.
-   * He enters the circular arc with a steadily increasing steering angle and leaves it
-   * with a steadily decreasing steering angle. In the arc, the steering is at full lock,
-   * so the radius is the minimum turning radius of the vehicle.
-   * The steering angle changes by "rate" per meter of travel.
+  /* Driving style 1. The guide line is made of straight lines and circular arcs.
+   * The center of the front axle moves along the guide line. The arcs touch the straight
+   * lines (tangential), so the guide line has no kink. The steering angle changes quickly
+   * while the vehicle moves, so the transition curves are very small and the model does not
+   * use them. The steering angle follows from the motion of the rear axle: it increases
+   * steadily when the vehicle enters an arc and decreases steadily when it leaves the arc.
+   * The radius of an arc is never smaller than rFront. This is the minimum turning circle
+   * of the vehicle, with the steering at full lock.
    *
-   * One turn for a heading change "delta" (radians, positive):
-   *   ramp = travel length of one steering ramp, arc = travel length at full lock,
-   *   peak = highest steering angle. If delta is too small for full lock, peak is smaller
-   *   and there is no arc. */
-  function turnProfile(o, wb, delta) {
-    // Heading change of one full ramp: integral of tan(rate * s) / wb
-    const hr = -Math.log(Math.cos(o.dMax)) / (o.rate * wb);
-    if (delta >= 2 * hr) return { peak: o.dMax, ramp: o.dMax / o.rate, arc: (delta - 2 * hr) * wb / Math.tan(o.dMax) };
-    const peak = Math.acos(Math.exp(-delta * o.rate * wb / 2));
-    return { peak: peak, ramp: peak / o.rate, arc: 0 };
-  }
-
-  function turnSteer(p, s) {
-    const len = 2 * p.ramp + p.arc;
-    if (s <= 0 || s >= len) return 0;
-    if (s < p.ramp) return p.peak * s / p.ramp;
-    if (s < p.ramp + p.arc) return p.peak;
-    return p.peak * (len - s) / p.ramp;
-  }
-
-  /* Drive one turn from state st. sign is +1 or -1 (turn direction). Push the samples to out.
-   * Return the end state (steering angle 0). */
-  function simulateTurn(st, sign, delta, v, o, out) {
-    const p = turnProfile(o, v.wb, delta), len = 2 * p.ramp + p.arc;
-    const n = Math.max(1, Math.ceil(len / o.step)), ds = len / n;
-    let Rx = st.Rx, Ry = st.Ry, th = st.th;
-    for (let i = 0; i < n; i++) {
-      const dth = Math.tan(sign * turnSteer(p, (i + 0.5) * ds)) / v.wb * ds, am = th + dth / 2;
-      Rx += ds * Math.cos(am); Ry += ds * Math.sin(am); th += dth;
-      if (out) out.push(Sim.sample(v, Rx, Ry, th, sign * turnSteer(p, (i + 1) * ds), st.s + (i + 1) * ds));
-    }
-    return Sim.sample(v, Rx, Ry, th, 0, st.s + len);
-  }
-
-  /* Build the route from a guide line. The guide line is made of straight lines and circular
-   * arcs. The center of the front axle moves along it.
-   * pts = corner points of the straight lines (the first point is the start of the front axle).
-   * The vehicle starts in the direction of the first line.
-   * At each corner point, a turn replaces the corner: the vehicle starts to turn before the
-   * corner point, and it is on the next straight line after the turn. The radius is never
-   * smaller than the minimum turning radius, because the steering limits apply.
+   * Build the route from the corner points pts (the first point is the start of the front axle).
+   * The vehicle starts in the direction of the first line. At each corner point, an arc with
+   * a radius R replaces the corner. The radius is as large as the lines allow, so the
+   * curves are larger when the points are further away. A line gives one half of its free
+   * length to each of its two arcs. A line that is not next to another arc gives all of it.
    * Return:
-   *   smp  = all samples (the first one is the start),
-   *   fail = null, or { leg, need, have } for the first straight line that is too short
-   *          for the turns at its two ends (need and have are lengths in meters).
-   * The samples are also made when a line is too short. The route is then not usable. */
+   *   smp  = samples of the route (the first one is the start),
+   *   fail = null, or the reason why the route cannot be driven:
+   *          { kind: 'length', leg, need, have } a line is too short for the arcs at its two ends
+   *          (leg = index of the line, need and have in meters), or
+   *          { kind: 'steer', maxD } the steering angle is more than the limit,
+   *   arcs = for each corner point: { R, t, delta } or null if there is no arc.
+   * The samples are also made when the route cannot be driven, so that the vehicle is always shown. */
   Sim.buildRoute = function (pts, v, o) {
     const P = [];
     for (const p of pts) if (!P.length || hyp(p.x - P[P.length - 1].x, p.y - P[P.length - 1].y) > 1e-6) P.push(p);
-    if (P.length < 2) return { smp: [Sim.startState(v, P[0], 0)], fail: null };
+    if (P.length < 2) return { smp: [Sim.startState(v, P[0], 0)], fail: null, arcs: [] };
     const n = P.length - 1, th = [], len = [];
     for (let j = 0; j < n; j++) {
       th.push(Math.atan2(P[j + 1].y - P[j].y, P[j + 1].x - P[j].x));
       len.push(hyp(P[j + 1].x - P[j].x, P[j + 1].y - P[j].y));
     }
-    // Space that each corner needs: a before the corner point, b after it.
-    // A value below zero is possible: the front axle goes past the corner point before the steering starts,
-    // or the turn ends before the corner point.
+    // Corner j is at point P[j] (j = 1 .. n-1). tMin = length of the tangent for the smallest radius.
     const cor = [];
     for (let j = 1; j < n; j++) {
-      const dl = normAngle(th[j] - th[j - 1]);
-      if (Math.abs(dl) < 1e-3) { cor[j] = { turn: false, a: 0, b: 0 }; continue; }
-      if (Math.PI - Math.abs(dl) < 0.02) { cor[j] = { turn: false, a: Infinity, b: Infinity }; continue; }
-      const sign = dl > 0 ? 1 : -1;
-      const e = simulateTurn(Sim.startState(v, { x: 0, y: 0 }, 0), sign, Math.abs(dl), v, o, null);
-      const c = Math.cos(th[j - 1]), sn = Math.sin(th[j - 1]);
-      const w = { x: e.Fx * c - e.Fy * sn, y: e.Fx * sn + e.Fy * c };     // front axle move of the turn
-      const u2 = { x: Math.cos(th[j]), y: Math.sin(th[j]) };
-      const a = -(u2.x * w.y - u2.y * w.x) / Math.sin(dl);                 // the end of the turn is on line j
-      const b = u2.x * (w.x - a * c) + u2.y * (w.y - a * sn);
-      cor[j] = { turn: true, sign: sign, delta: Math.abs(dl), a: a, b: b };
+      const dl = normAngle(th[j] - th[j - 1]), half = Math.abs(dl) / 2;
+      const active = Math.abs(dl) >= 1e-3;
+      cor[j] = { active: active, dl: dl, half: half, tMin: active ? o.rFront * Math.tan(half) : 0 };
+      if (active && Math.PI - Math.abs(dl) < 0.02) cor[j].tMin = Infinity;   // nearly a reversal
     }
+    const tMinAt = (j) => (j >= 1 && j < n ? cor[j].tMin : 0);
+    const activeAt = (j) => j >= 1 && j < n && cor[j].active;
     let fail = null;
     for (let j = 0; j < n && !fail; j++) {
-      const need = (j >= 1 ? cor[j].b : 0) + (j + 1 < n ? cor[j + 1].a : 0);
-      if (len[j] + 1e-6 < need) fail = { leg: j, need: need, have: len[j] };
+      const need = tMinAt(j) + tMinAt(j + 1);
+      if (len[j] + 1e-6 < need) fail = { kind: 'length', leg: j, need: need, have: len[j] };
     }
-    let cur = Sim.startState(v, P[0], th[0]);
-    const smp = [cur];
-    const straight = (T) => {      // drive straight (steering angle 0) until the front axle is at T
-      const ux = Math.cos(cur.th), uy = Math.sin(cur.th);
-      const l = Math.max(0, ux * (T.x - cur.Fx) + uy * (T.y - cur.Fy));
-      const m = Math.ceil(l / o.step);
-      const base = cur;
-      for (let i = 1; i <= m; i++) {
-        const ds = l * i / m;
-        smp.push(Sim.sample(v, base.Rx + ds * ux, base.Ry + ds * uy, base.th, 0, base.s + ds));
-      }
-      cur = smp[smp.length - 1];
+    // Free length of the lines goes to the arcs, so that the radii are as large as possible.
+    const arcs = [null];
+    for (let j = 1; j < n; j++) {
+      const c = cor[j];
+      if (!c.active) { arcs[j] = null; continue; }
+      const free = (leg, other) => Math.max(0, len[leg] - c.tMin - tMinAt(other)) * (activeAt(other) ? 0.5 : 1);
+      let t = c.tMin + Math.min(free(j - 1, j - 1), free(j, j + 1));
+      t = Math.min(t, o.rMax * Math.tan(c.half));
+      if (!isFinite(t)) t = c.tMin;
+      t = Math.max(t, Math.min(c.tMin, len[j - 1]), 0);
+      arcs[j] = { R: isFinite(c.tMin) ? t / Math.tan(c.half) : 0, t: t, delta: c.dl };
+    }
+    // Sample the guide line (front axle center), then move the vehicle along it.
+    const path = [{ x: P[0].x, y: P[0].y }];
+    const line = (T) => {
+      const last = path[path.length - 1], l = hyp(T.x - last.x, T.y - last.y), m = Math.ceil(l / o.step);
+      if (l < 1e-6) return;     // the point is already on the path
+      for (let i = 1; i <= m; i++) path.push({ x: last.x + (T.x - last.x) * i / m, y: last.y + (T.y - last.y) * i / m });
     };
-    for (let j = 0; j < n; j++) {
-      const k = j + 1, turns = k < n && cor[k].turn;
-      if (turns) {
-        straight({ x: P[k].x - cor[k].a * Math.cos(th[j]), y: P[k].y - cor[k].a * Math.sin(th[j]) });
-        cur = simulateTurn(cur, cor[k].sign, cor[k].delta, v, o, smp);
-      } else {
-        straight(P[k]);
+    for (let j = 1; j < n; j++) {
+      const a = arcs[j];
+      if (!a || !(a.R > 0)) continue;
+      const ux = Math.cos(th[j - 1]), uy = Math.sin(th[j - 1]), sign = a.delta > 0 ? 1 : -1;
+      const A = { x: P[j].x - a.t * ux, y: P[j].y - a.t * uy };               // start of the arc
+      const C = { x: A.x - sign * a.R * uy, y: A.y + sign * a.R * ux };         // center of the arc
+      line(A);
+      const phi0 = Math.atan2(A.y - C.y, A.x - C.x), m = Math.max(1, Math.ceil(a.R * Math.abs(a.delta) / o.step));
+      for (let i = 1; i <= m; i++) {
+        const phi = phi0 + a.delta * i / m;
+        path.push({ x: C.x + a.R * Math.cos(phi), y: C.y + a.R * Math.sin(phi) });
       }
     }
-    return { smp: smp, fail: fail, cor: cor };
+    line(P[n]);
+    const smp = Sim.run(path, v);
+    let maxD = 0;
+    for (const q of smp) maxD = Math.max(maxD, Math.abs(q.d));
+    if (!fail && maxD > o.dMax + 0.01) fail = { kind: 'steer', maxD: maxD };
+    return { smp: smp, fail: fail, arcs: arcs };
   };
 
   Sim.local = function (smp, x, y) {
@@ -307,9 +284,9 @@
     const m = Sim.scaleFromPolyline([{ x: 0, y: 0 }, { x: 30, y: 0 }, { x: 30, y: 40 }], 10);
     add('Maßstab: Linienzug 70 pt = 10 m', Math.abs(m - 10 / 70) < 1e-12, (1 / m).toFixed(2) + ' pt/m');
 
-    // Route tests (driving style 1): limits for the steering angle and for its rate must hold.
-    const o = Sim.driveOpts(v);
-    const pt = (x, y) => ({ x: x, y: y });
+    // Route tests (driving style 1)
+    const o = Sim.driveOpts(v), pt = (x, y) => ({ x: x, y: y });
+    const front = (smp) => smp.map((q) => ({ x: q.Fx, y: q.Fy }));
     const stRoute = Sim.buildRoute([pt(0, 0), pt(10, 0)], v, o);
     add('Fahrweise 1: Gerade, Lenkwinkel 0', !stRoute.fail && stRoute.smp.every((q) => Math.abs(q.d) < 1e-9), '');
 
@@ -317,36 +294,62 @@
     const cEnd = corner.smp[corner.smp.length - 1];
     add('Fahrweise 1: 90°-Ecke fahrbar, Ziel auf 1 mm genau', !corner.fail && hyp(cEnd.Fx - 20, cEnd.Fy - 20) < 0.001,
       (hyp(cEnd.Fx - 20, cEnd.Fy - 20) * 1000).toFixed(2) + ' mm');
-    const early = corner.smp.find((q) => Math.abs(q.d) > 1e-6);
-    add('Fahrweise 1: Kurve beginnt vor dem Eckpunkt', early && early.Fx < 20 - 1, early ? 'Beginn bei x = ' + early.Fx.toFixed(1) + ' m' : '');
-    const tight = Sim.buildRoute([pt(0, 0), pt(5, 0), pt(5, 5)], v, o);
-    add('Fahrweise 1: zu kurze Strecken für 90°-Kurve werden erkannt', !!tight.fail,
-      tight.fail ? 'nötig ' + tight.fail.need.toFixed(1) + ' m, vorhanden ' + tight.fail.have.toFixed(1) + ' m' : '');
+
+    // The guide line has no kink: the change of direction per step is small everywhere,
+    // and the radius is never below the minimum radius of the front axle.
+    let maxTurn = 0, minR = Infinity;
+    const gl = front(corner.smp);
+    for (let i = 2; i < gl.length; i++) {
+      const a = Math.atan2(gl[i - 1].y - gl[i - 2].y, gl[i - 1].x - gl[i - 2].x), b = Math.atan2(gl[i].y - gl[i - 1].y, gl[i].x - gl[i - 1].x);
+      const dth = Math.abs(normAngle(b - a)), ds = hyp(gl[i].x - gl[i - 1].x, gl[i].y - gl[i - 1].y);
+      maxTurn = Math.max(maxTurn, dth);
+      if (dth > 1e-6) minR = Math.min(minR, ds / dth);
+    }
+    add('Fahrweise 1: Leitlinie ohne Knick', maxTurn < 0.02, 'max. Richtungsänderung ' + (maxTurn * 180 / Math.PI).toFixed(2) + '° pro 5 cm');
+    add('Fahrweise 1: Radius nie unter Mindestradius', minR >= o.rFront - 0.01, 'kleinster Radius ' + minR.toFixed(2) + ' m, Grenze ' + o.rFront.toFixed(2) + ' m');
+
+    const near = Sim.buildRoute([pt(0, 0), pt(20, 0), pt(20, 20)], v, o), far = Sim.buildRoute([pt(0, 0), pt(60, 0), pt(60, 60)], v, o);
+    add('Fahrweise 1: je weiter die Punkte, desto größer die Kurve', far.arcs[1].R > near.arcs[1].R * 2 && near.arcs[1].R > o.rFront,
+      'R = ' + near.arcs[1].R.toFixed(1) + ' m bei 20 m, ' + far.arcs[1].R.toFixed(1) + ' m bei 60 m');
+    const tight = Sim.buildRoute([pt(0, 0), pt(3, 0), pt(3, 3)], v, o);
+    add('Fahrweise 1: zu kurze Strecken werden erkannt', tight.fail && tight.fail.kind === 'length',
+      tight.fail && tight.fail.need ? 'nötig ' + tight.fail.need.toFixed(1) + ' m, vorhanden ' + tight.fail.have.toFixed(1) + ' m' : '');
+
+    // Smallest possible curve: the lines are only as long as the minimum radius needs.
+    const small = Sim.buildRoute([pt(0, 0), pt(o.rFront + 0.001, 0), pt(o.rFront + 0.001, o.rFront + 0.001)], v, o);
+    let smallD = 0, smallOuter = 0;
+    small.smp.forEach((q) => { smallD = Math.max(smallD, Math.abs(q.d)); for (const k of Sim.bodyPoly(q, v)) smallOuter = Math.max(smallOuter, hyp(k.x - (o.rFront + 0.001 - 0), k.y - 0)); });
+    add('Fahrweise 1: kleinste Kurve fahrbar, Lenkwinkel nicht über dem Limit', !small.fail && smallD <= o.dMax + 0.01,
+      (smallD * 180 / Math.PI).toFixed(1) + '° von ' + (o.dMax * 180 / Math.PI).toFixed(1) + '°');
 
     const multi = Sim.buildRoute([pt(0, 0), pt(20, 0), pt(40, 15), pt(45, 40), pt(20, 60), pt(20, 90)], v, o);
-    let worstD = 0, worstRate = 0, jump = 0;
+    let worstD = 0, jump = 0;
     multi.smp.forEach((q, i) => {
       worstD = Math.max(worstD, Math.abs(q.d));
-      if (i) {
-        worstRate = Math.max(worstRate, Math.abs(q.d - multi.smp[i - 1].d) / (q.s - multi.smp[i - 1].s));
-        jump = Math.max(jump, hyp(q.Rx - multi.smp[i - 1].Rx, q.Ry - multi.smp[i - 1].Ry));
-      }
+      if (i) jump = Math.max(jump, hyp(q.Rx - multi.smp[i - 1].Rx, q.Ry - multi.smp[i - 1].Ry));
     });
-    add('Fahrweise 1: Mehrfach-Route fahrbar', !multi.fail, multi.fail ? 'Strecke ' + (multi.fail.leg + 1) + ' zu kurz' : '');
-    add('Fahrweise 1: Lenkwinkel nie über Limit', worstD <= o.dMax + 1e-9, (worstD * 180 / Math.PI).toFixed(2) + '°');
-    add('Fahrweise 1: Lenkgeschwindigkeit nie über Limit', worstRate <= o.rate + 1e-6, (worstRate * 180 / Math.PI).toFixed(1) + '°/m');
+    add('Fahrweise 1: Mehrfach-Route fahrbar', !multi.fail, multi.fail ? 'Fehler: ' + multi.fail.kind : '');
+    add('Fahrweise 1: Lenkwinkel nie über Limit', worstD <= o.dMax + 0.01, (worstD * 180 / Math.PI).toFixed(2) + '°');
     add('Fahrweise 1: Weg ohne Sprünge', jump < 0.0501, 'max. Schritt ' + (jump * 1000).toFixed(1) + ' mm');
+    // Two arcs in opposite directions, one after the other: the steering must still stay in the limit.
+    const zig = Sim.buildRoute([pt(0, 0), pt(12, 0), pt(12 + 8.5, 8.5), pt(12 + 8.5 + 12, 8.5)], v, o);
+    let zigD = 0;
+    zig.smp.forEach((q) => { zigD = Math.max(zigD, Math.abs(q.d)); });
+    add('Fahrweise 1: S-Kurve, Lenkwinkel im Limit', !zig.fail && zigD <= o.dMax + 0.01, (zigD * 180 / Math.PI).toFixed(1) + '°');
 
-    // In a large turn, the arc is at full lock and the outer body corner is on the turning circle.
-    let outer = 0;
-    const arc = corner.smp.filter((q) => Math.abs(q.d) >= o.dMax - 1e-9);
-    if (arc.length) {
-      const q = arc[Math.floor(arc.length / 2)];
-      const rr = lim.rRear, cx = q.Rx - rr * Math.sin(q.th), cy = q.Ry + rr * Math.cos(q.th);   // circle center (left turn)
-      for (const a of arc) for (const k of Sim.bodyPoly(a, v)) outer = Math.max(outer, hyp(k.x - cx, k.y - cy));
+    // Smallest curve: the guide line has the minimum radius, and the body never goes outside the turning circle.
+    // The center of the arc is at (0, rFront). The outer body corner is on the right side of the vehicle.
+    let minRG = Infinity, outer = 0;
+    const g2 = front(small.smp);
+    for (let i = 2; i < g2.length; i++) {
+      const a = Math.atan2(g2[i - 1].y - g2[i - 2].y, g2[i - 1].x - g2[i - 2].x), b = Math.atan2(g2[i].y - g2[i - 1].y, g2[i].x - g2[i - 1].x);
+      const dth = Math.abs(normAngle(b - a));
+      if (dth > 1e-6) minRG = Math.min(minRG, hyp(g2[i].x - g2[i - 1].x, g2[i].y - g2[i - 1].y) / dth);
     }
-    add('Fahrweise 1: Bogen bei Vollausschlag, Außenradius = Wendekreis ' + v.rOuter + ' m',
-      arc.length > 20 && Math.abs(outer - v.rOuter) < 0.02, 'gemessen ' + outer.toFixed(3) + ' m, ' + (arc.length * o.step).toFixed(1) + ' m Bogen');
+    // Only the samples in the turn count. Before it, the vehicle is on the straight line.
+    for (const q of small.smp) if (q.th > 0.5) for (const k of Sim.bodyPoly(q, v)) outer = Math.max(outer, hyp(k.x - 0, k.y - (o.rFront + 0.001)));
+    add('Fahrweise 1: kleinste Kurve hat den Mindestradius ' + o.rFront.toFixed(2) + ' m', Math.abs(minRG - o.rFront) < 0.02, 'gemessen ' + minRG.toFixed(2) + ' m');
+    add('Fahrweise 1: Karosserie bleibt innerhalb des Wendekreises ' + v.rOuter + ' m', outer <= v.rOuter + 0.02 && outer > 5, 'größter Abstand ' + outer.toFixed(2) + ' m');
     return res;
   };
 

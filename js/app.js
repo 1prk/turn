@@ -23,17 +23,20 @@
     seg: 'line',                        // The type of the next part: 'line' (straight line, corner), 'arc' (arc through the point) or 'turn' (turn by angle).
     turnGon: 200,                       // The change of direction of a turn [gon]. 200 gon is a turn around.
     turnR: 0,                           // The radius of a turn [m]. 0 means the minimum turning circle.
-    mouse: null, res: null
+    mouse: null, res: null,
+    routes: [], ri: 0                   // The driving lines. ri = the index of the active one. The fields start, wps, pos, res and valid belong to the active line.
   };
 
   /* ---------- vehicles ---------- */
   const STORE = 'schleppkurve.vehicles.v1';
-  const FIELDS = { v_wb: 'wb', v_front: 'front', v_rear: 'rear', v_width: 'width', v_rout: 'rOuter', v_track: 'track', v_ratio: 'ratio' };
+  const FIELDS = { v_wb: 'wb', v_front: 'front', v_rear: 'rear', v_width: 'width', v_rout: 'rOuter', v_track: 'track', v_ratio: 'ratio', v_gap: 'gap' };
   let vehicles = Sim.PRESETS.map((v) => Object.assign({}, v)), selIdx = 0;
   try {      // The browser can block the storage. The page also works without it.
     const saved = JSON.parse(localStorage.getItem(STORE));
     if (saved && Array.isArray(saved.list) && saved.list.length) {
       vehicles = saved.list.map((v) => Object.assign({}, Sim.PRESETS[0], v));
+      // Add the preset vehicles that the saved list does not have. This is the case after an update.
+      Sim.PRESETS.forEach((p) => { if (!vehicles.some((v) => v.name === p.name)) vehicles.push(Object.assign({}, p)); });
       selIdx = Math.min(Math.max(0, saved.sel | 0), vehicles.length - 1);
     }
   } catch (err) { /* Use the preset vehicles. */ }
@@ -42,6 +45,12 @@
     try { localStorage.setItem(STORE, JSON.stringify({ list: vehicles, sel: selIdx })); } catch (err) { /* There is no storage. */ }
   }
   let pdfDoc = null, spaceDown = false, drag = null, lastClick = { t: 0, x: 0, y: 0 };
+
+  /* ---------- driving lines ---------- */
+  // Each driving line has its own points and its own vehicle. The line that the user edits is the active line.
+  const ROUTE_COLORS = [null, '#ea580c', '#9333ea', '#0d9488', '#db2777', '#65a30d'];      // The active line has the standard colors.
+  function newRoute(name) { return { name: name, veh: veh, start: null, wps: [], pos: 1, res: null, valid: 0 }; }
+  S.routes = [newRoute('Fahrkurve 1')];
 
   /* ---------- view helpers ---------- */
   const s2p = (x, y) => ({ x: (x - S.ox) / S.zoom, y: (y - S.oy) / S.zoom });
@@ -71,7 +80,9 @@
     S.mpp = null; S.scalePts = []; S.scaleDone = false;
     S.start = null; S.pend = null; S.wps = []; S.prev = null;
     S.pos = 1; S.playing = false;
+    S.routes = [newRoute('Fahrkurve 1')]; S.ri = 0;
     $('pos').value = 1000;
+    renderRoutes();
   }
 
   async function renderPage(n) {
@@ -128,35 +139,50 @@
   }
 
   /* ---------- calculation ---------- */
-  function recompute() {
-    S.res = null; S.prev = null; S.valid = S.wps.length;
-    const lim = Sim.steerLimit(veh), o = Sim.driveOpts(veh);
-    if (S.mpp && S.start && lim) {
-      // Draw only the part of the route that the vehicle can drive.
-      // A point after a line that is too short is not valid.
-      const pts = routeM(null);
-      for (let k = 2; k <= S.wps.length; k++) {
-        const r = Sim.buildRoute(pts.slice(0, k + 1), veh, o, { checkOnly: true });
-        if (r.fail) { S.valid = k - 1; break; }
-      }
-      const run = Sim.buildRoute(pts.slice(0, S.valid + 1), veh, o);
-      S.res = analyse(run.smp, lim);
-      S.res.lim = lim; S.res.fail = run.fail;
-      // A turn has no point of its own. Its marker is at the end of the turn.
-      S.wps.forEach((w, i) => {
-        const e = run.ends[i + 1];
-        if (w.t === 'turn' && i < S.valid && e) { w.x = e.x / S.mpp; w.y = e.y / S.mpp; }
-      });
+  /* Calculate one driving line with its vehicle v.
+   * Return { res, valid }: the result for the drawing (or null) and the number of points that the vehicle can drive. */
+  function computeRoute(start, wps, v) {
+    const lim = Sim.steerLimit(v), o = Sim.driveOpts(v);
+    if (!S.mpp || !start || !lim) return { res: null, valid: wps.length };
+    // Draw only the part of the route that the vehicle can drive.
+    // A point after a line that is too short is not valid.
+    const pts = routeMOf(start, wps, null);
+    let valid = wps.length;
+    for (let k = 2; k <= wps.length; k++) {
+      const r = Sim.buildRoute(pts.slice(0, k + 1), v, o, { checkOnly: true });
+      if (r.fail) { valid = k - 1; break; }
     }
+    const run = Sim.buildRoute(pts.slice(0, valid + 1), v, o);
+    const res = analyse(run.smp, lim, v);
+    res.lim = lim; res.fail = run.fail;
+    // A turn has no point of its own. Its marker is at the end of the turn.
+    wps.forEach((w, i) => {
+      const e = run.ends[i + 1];
+      if (w.t === 'turn' && i < valid && e) { w.x = e.x / S.mpp; w.y = e.y / S.mpp; }
+    });
+    return { res: res, valid: valid };
+  }
+
+  function recompute() {
+    S.prev = null;
+    const c = computeRoute(S.start, S.wps, veh);
+    S.res = c.res; S.valid = c.valid;
+    // The other driving lines do not change, but their results depend on the scale and on the vehicles.
+    S.routes.forEach((r, i) => {
+      if (i === S.ri) return;
+      const o = computeRoute(r.start, r.wps, r.veh);
+      r.res = o.res; r.valid = o.valid;
+    });
     updatePreview();
   }
 
-  /* The points of the guide line in meters, with the type of each point ('line' or 'arc').
+  /* The points of the guide line in meters, with the type of each point ('line', 'arc' or 'turn').
    * extra = one more point (plan units) or null. */
-  function routeM(extra) {
-    const pts = [S.start.p].concat(S.wps, extra ? [extra] : []);
+  function routeMOf(start, wps, extra) {
+    const pts = [start.p].concat(wps, extra ? [extra] : []);
     return pts.map((q) => ({ x: q.x * S.mpp, y: q.y * S.mpp, t: q.t, sweep: q.sweep, R: q.R }));
   }
+  function routeM(extra) { return routeMOf(S.start, S.wps, extra); }
 
   function routeOk() { return !!S.res && !S.res.fail && S.valid === S.wps.length; }
 
@@ -206,7 +232,8 @@
   }
 
   /* Make the drawing paths (in meters) and the numbers for a list of samples. */
-  function analyse(smp, lim) {
+  function analyse(smp, lim, v) {
+    v = v || veh;
     const A = { smp: smp, sweep: new Path2D(), sat: new Path2D(), front: new Path2D(),
                 rear: new Path2D(), trails: new Path2D(), sil: new Path2D(),
                 maxD: 0, satLen: 0, turn: 0, length: smp[smp.length - 1].s };
@@ -214,7 +241,7 @@
     const silStep = Math.max(0.5, parseFloat($('silStep').value) || 2);
     let nextSil = 0;
     smp.forEach((p, i) => {
-      const poly = Sim.bodyPoly(p, veh);
+      const poly = Sim.bodyPoly(p, v);
       poly.forEach((c, k) => trail[k].push(c));
       if (i % 2 === 0 || i === smp.length - 1) addPoly(A.sweep, poly);
       if (p.s >= nextSil) { addPoly(A.sil, poly); nextSil += silStep; }
@@ -301,6 +328,7 @@
     if (S.pageImg) { ctx.imageSmoothingQuality = 'high'; ctx.drawImage(S.pageImg, 0, 0, S.pw, S.ph); }
     else drawGrid(px);
     drawScale(px);
+    drawOthers(px);
     drawResult(px);
     drawPoints(px);
     drawHud();
@@ -364,26 +392,60 @@
     ctx.restore();
   }
 
-  function drawVehicle(p, um, alpha) {
-    const L = veh.front + veh.wb + veh.rear, hw = veh.width / 2, wl = 0.65, ww = 0.22;
+  /* Draw the vehicle v at the sample p. The origin is the center of the rear axles.
+   * A vehicle with gap > 0 has two rear axles at the distance gap/2 in front of and behind this center.
+   * The front wheels have the steering angle p.d. If the vehicle has a trailing steered axle, the rearmost
+   * axle steers against the front axle. Its wheels are perpendicular to the line to the center of the turn. */
+  function drawVehicle(p, um, alpha, v, color) {
+    v = v || veh;
+    color = color || '#0b3d91';
+    const L = v.front + v.wb + v.rear, hw = v.width / 2;
+    const wl = v.width > 2.2 ? 1.0 : 0.65, ww = v.width > 2.2 ? 0.30 : 0.22;       // A truck has larger wheels.
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.translate(p.Rx, p.Ry); ctx.rotate(p.th);
-    ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.strokeStyle = '#0b3d91'; ctx.lineWidth = 1.5 * um;
-    ctx.fillRect(-veh.rear, -hw, L, veh.width); ctx.strokeRect(-veh.rear, -hw, L, veh.width);
+    ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.strokeStyle = color; ctx.lineWidth = 1.5 * um;
+    ctx.fillRect(-v.rear, -hw, L, v.width); ctx.strokeRect(-v.rear, -hw, L, v.width);
     ctx.fillStyle = '#222';
     const wheel = (x, y, a) => {
       ctx.save(); ctx.translate(x, y); ctx.rotate(a); ctx.fillRect(-wl / 2, -ww / 2, wl, ww); ctx.restore();
     };
-    const t = veh.track / 2;
-    wheel(0, -t, 0); wheel(0, t, 0);
-    wheel(veh.wb, -t, p.d); wheel(veh.wb, t, p.d);
-    ctx.strokeStyle = '#0b3d91'; ctx.lineWidth = um;     // The axles and the arrow of the direction.
-    ctx.beginPath(); ctx.moveTo(0, -t); ctx.lineTo(0, t); ctx.moveTo(veh.wb, -t); ctx.lineTo(veh.wb, t);
-    const xf = veh.wb + veh.front;
+    const t = v.track / 2, g = v.gap > 0 ? v.gap / 2 : 0;
+    const rear = g > 0 ? [-g, g] : [0];                                          // The x positions of the rear axles.
+    const trailAngle = v.trail && g > 0 ? -Math.atan(g * Math.tan(p.d) / v.wb) : 0;
+    rear.forEach((x) => {
+      const a = x < 0 ? trailAngle : 0;
+      wheel(x, -t, a); wheel(x, t, a);
+    });
+    wheel(v.wb, -t, p.d); wheel(v.wb, t, p.d);
+    ctx.strokeStyle = color; ctx.lineWidth = um;     // The axles and the arrow of the direction.
+    ctx.beginPath();
+    rear.concat([v.wb]).forEach((x) => { ctx.moveTo(x, -t); ctx.lineTo(x, t); });
+    const xf = v.wb + v.front;
     ctx.moveTo(xf - 0.5, -0.25); ctx.lineTo(xf - 0.1, 0); ctx.lineTo(xf - 0.5, 0.25);
     ctx.stroke();
     ctx.restore();
+  }
+
+  /* Draw the driving lines that are not active. They are weaker than the active line.
+   * Each line has its own color and its own vehicle. */
+  function drawOthers(px) {
+    if (!S.mpp) return;
+    const k = 1 / S.mpp, um = px * S.mpp;
+    S.routes.forEach((r, i) => {
+      if (i === S.ri || !r.res) return;
+      const col = ROUTE_COLORS[i % ROUTE_COLORS.length] || '#0b3d91';
+      ctx.save();
+      ctx.scale(k, k);
+      ctx.globalAlpha = 0.28; ctx.fillStyle = col; ctx.fill(r.res.sweep);
+      ctx.globalAlpha = 0.9; ctx.lineWidth = um; ctx.strokeStyle = col; ctx.stroke(r.res.trails);
+      ctx.lineWidth = 1.5 * um; ctx.stroke(r.res.front);
+      drawVehicle(r.res.smp[Math.round(r.pos * (r.res.smp.length - 1))], um, 0.8, r.veh, col);
+      ctx.restore();
+      ctx.fillStyle = col; ctx.font = 12 * px + 'px system-ui,sans-serif';       // The name at the start point.
+      ctx.fillText(r.name, r.start.p.x + 8 * px, r.start.p.y - 8 * px);
+      ctx.beginPath(); ctx.arc(r.start.p.x, r.start.p.y, 4 * px, 0, 7); ctx.fill();
+    });
   }
 
   /* Draw the start, the points and the mouse marker (plan units). */
@@ -634,6 +696,8 @@
     else if (k === 'g') setSeg('line');
     else if (k === 'b') setSeg('arc');
     else if (k === 'k') setSeg('turn');
+    else if (k === '[') selectRoute(S.ri - 1);
+    else if (k === ']') selectRoute(S.ri + 1);
     else if (k === 'w') { $('turnGon').value = 200; S.turnGon = 200; setSeg('turn'); }      // A turn around: 200 gon.
     else if (k === 'm') setTool('scale');
     else if (k === 'p') $('play').click();
@@ -713,12 +777,15 @@
 
   function refreshFields() {
     $('v_name').value = veh.name;
-    Object.keys(FIELDS).forEach((id) => { $(id).value = veh[FIELDS[id]]; });
+    Object.keys(FIELDS).forEach((id) => { $(id).value = veh[FIELDS[id]] || 0; });
+    $('v_trail').checked = !!veh.trail;
   }
 
+  /* Choose the vehicle for the active driving line. */
   function selectVehicle(i) {
     selIdx = i; veh = vehicles[i];
-    refreshFields(); renderVehicles(); saveVehicles(); recompute();
+    S.routes[S.ri].veh = veh;
+    refreshFields(); renderVehicles(); renderRoutes(); saveVehicles(); recompute();
   }
 
   function addVehicle() {
@@ -730,20 +797,85 @@
 
   $('vehDel').addEventListener('click', () => {
     if (veh.preset || !confirm('Fahrzeug „' + veh.name + '“ löschen?')) return;
+    const gone = veh;
     vehicles.splice(selIdx, 1);
+    S.routes.forEach((r) => { if (r.veh === gone) r.veh = vehicles[0]; });      // A driving line must always have a vehicle.
     selectVehicle(Math.max(0, selIdx - 1));
   });
   $('vehReset').addEventListener('click', () => {
     const base = Sim.PRESETS.find((v) => v.name === veh.name);
     if (base) { Object.assign(veh, base); refreshFields(); saveVehicles(); recompute(); }
   });
-  $('v_name').addEventListener('input', () => { veh.name = $('v_name').value || 'Fahrzeug'; renderVehicles(); saveVehicles(); });
+  $('v_name').addEventListener('input', () => { veh.name = $('v_name').value || 'Fahrzeug'; renderVehicles(); renderRoutes(); saveVehicles(); });
   Object.keys(FIELDS).forEach((id) => {
     $(id).addEventListener('input', () => {
       const v = parseFloat($(id).value);
-      if (v > 0) { veh[FIELDS[id]] = v; saveVehicles(); recompute(); }
+      // The distance of the rear axles can be 0 (one rear axle). All other values must be more than 0.
+      if (v > 0 || (FIELDS[id] === 'gap' && v >= 0)) { veh[FIELDS[id]] = v; saveVehicles(); recompute(); }
     });
   });
+  $('v_trail').addEventListener('change', () => { veh.trail = $('v_trail').checked; saveVehicles(); requestDraw(); });
+
+  /* ---------- list of driving lines ---------- */
+  function renderRoutes() {
+    const box = $('routeList');
+    box.innerHTML = '';
+    S.routes.forEach((r, i) => {
+      const b = document.createElement('button');
+      b.className = 'chip' + (i === S.ri ? ' active' : '');
+      b.textContent = r.name + ' · ' + r.veh.name;
+      b.title = 'Fahrkurve wählen (Tasten [ und ])';
+      const col = ROUTE_COLORS[i % ROUTE_COLORS.length];
+      if (col && i !== S.ri) b.style.borderLeft = '5px solid ' + col;
+      b.addEventListener('click', () => selectRoute(i));
+      box.appendChild(b);
+    });
+    const add = document.createElement('button');
+    add.className = 'chip'; add.textContent = '+'; add.title = 'Neue Fahrkurve anlegen (mit dem gewählten Fahrzeug)';
+    add.addEventListener('click', addRoute);
+    box.appendChild(add);
+    $('routeDel').style.display = S.routes.length > 1 ? '' : 'none';
+    if ($('r_name').value !== S.routes[S.ri].name) $('r_name').value = S.routes[S.ri].name;      // Do not move the cursor while the user types.
+  }
+
+  /* Keep the working fields of the active line in its record. */
+  function saveRoute() {
+    const r = S.routes[S.ri];
+    r.start = S.start; r.wps = S.wps; r.pos = S.pos; r.veh = veh; r.res = S.res; r.valid = S.valid;
+  }
+
+  function selectRoute(i) {
+    if (i < 0 || i >= S.routes.length) return;
+    saveRoute();
+    S.ri = i;
+    const r = S.routes[i];
+    S.start = r.start; S.wps = r.wps; S.pos = r.pos; S.pend = null; S.playing = false;
+    veh = r.veh; selIdx = Math.max(0, vehicles.indexOf(veh));
+    $('pos').value = Math.round(S.pos * 1000);
+    refreshFields(); renderVehicles(); renderRoutes(); recompute();
+  }
+
+  function addRoute() {
+    const name = prompt('Name der neuen Fahrkurve:', 'Fahrkurve ' + (S.routes.length + 1));
+    if (name == null || !name.trim()) return;
+    saveRoute();
+    S.routes.push(newRoute(name.trim()));
+    selectRoute(S.routes.length - 1);
+    if (S.tool !== 'drive') setTool('drive');
+  }
+
+  $('routeDel').addEventListener('click', () => {
+    if (S.routes.length < 2 || !confirm('Fahrkurve „' + S.routes[S.ri].name + '“ löschen?')) return;
+    S.routes.splice(S.ri, 1);
+    const i = Math.max(0, S.ri - 1);
+    S.ri = i;                                   // The working fields now belong to a line that does not exist.
+    const r = S.routes[i];
+    S.start = r.start; S.wps = r.wps; S.pos = r.pos; S.pend = null; S.playing = false;
+    veh = r.veh; selIdx = Math.max(0, vehicles.indexOf(veh));
+    $('pos').value = Math.round(S.pos * 1000);
+    refreshFields(); renderVehicles(); renderRoutes(); recompute();
+  });
+  $('r_name').addEventListener('input', () => { S.routes[S.ri].name = $('r_name').value || 'Fahrkurve'; renderRoutes(); requestDraw(); });
 
   $('pos').addEventListener('input', () => { S.pos = $('pos').value / 1000; updateInfo(); requestDraw(); });
 
@@ -792,8 +924,8 @@
   });
 
   window.addEventListener('resize', resize);
-  window.Turn = { S: S, get veh() { return veh; }, vehicles: vehicles, selectVehicle: selectVehicle, setSeg: setSeg, recompute: recompute, finishScale: finishScale, setTool: setTool, updatePreview: updatePreview };
-  refreshFields(); renderVehicles();
+  window.Turn = { S: S, get veh() { return veh; }, vehicles: vehicles, selectVehicle: selectVehicle, selectRoute: selectRoute, addRoute: addRoute, setSeg: setSeg, recompute: recompute, finishScale: finishScale, setTool: setTool, updatePreview: updatePreview };
+  refreshFields(); renderVehicles(); renderRoutes();
   document.querySelectorAll('[data-seg]').forEach((b) => b.classList.toggle('active', b.dataset.seg === S.seg));
   resize(); setTool('scale'); updateInfo();
 })();

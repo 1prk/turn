@@ -86,6 +86,7 @@
     <div id="vInfo" class="mute" style="margin-top:6px"></div>
 
     <h2>4 · Fahren (Fahrweise 1)</h2>
+    <div class="mute" style="font-size:12px">Die <b>Leitlinie</b> ist der Weg der <b>Mitte der Vorderachse</b>, nicht der Karosserie. Bei einer Wende ist „Querversatz 2R“ nur der Versatz der Leitlinie. Der <b>Platzbedarf</b> ist etwa der Wendekreisdurchmesser 2 · R<sub>außen</sub> des Fahrzeugs.</div>
     <div class="row" id="routeList"></div>
     <div class="row"><input id="r_name" type="text" style="flex:1;min-width:120px" title="Name der Fahrkurve"><button id="routeDel">Fahrkurve löschen</button></div>
     <div class="row">
@@ -98,7 +99,7 @@
       <button data-seg="turn" title="Taste K: Kurve mit Richtungsänderung in gon und Radius, Taste W: Wende mit 200 gon">Kurve nach Winkel (K)</button>
     </div>
     <div class="row" id="turnRow">Kurve:
-      <input id="turnGon" type="number" value="200" min="1" max="390" step="5" style="width:68px" title="Richtungsänderung in gon. 200 gon = Wende in einem Zug"> gon
+      <input id="turnGon" type="number" value="200" min="1" max="390" step="5" style="width:68px" title="Richtungsänderung in gon. 200 gon = Wende in einem Zug. Der Querversatz der Leitlinie ist 2 · R, der Platzbedarf etwa der Wendekreisdurchmesser des Fahrzeugs"> gon
       <label title="Radius gleich Wendekreis (voller Lenkeinschlag, Fahrweise 1)"><input type="checkbox" id="turnRmin" checked> Wendekreis</label>
       <input id="turnR" type="number" value="" min="0" step="0.5" style="width:64px" disabled title="Radius der Vorderachsmitte in m. Nicht kleiner als der Wendekreis"> m
     </div>

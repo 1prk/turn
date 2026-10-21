@@ -30,7 +30,8 @@
   /* ---------- vehicles ---------- */
   const STORE = 'schleppkurve.vehicles.v1';
   const FIELDS = { v_wb: 'wb', v_front: 'front', v_rear: 'rear', v_width: 'width', v_rout: 'rOuter', v_track: 'track', v_ratio: 'ratio', v_gap: 'gap',
-                   v_hitch: 'hitch', v_axle2: 'axle2', v_rearOver: 'rearOver', v_knick: 'knickGon' };
+                   v_hitch: 'hitch', v_axle2: 'axle2', v_rearOver: 'rearOver', v_knick: 'knickGon',
+                   v_tractorRear: 'tractorRear', v_trailerFront: 'trailerFront', v_trailerWidth: 'trailerWidth' };
   let vehicles = Sim.PRESETS.map((v) => Object.assign({}, v)), selIdx = 0;
   try {      // The browser can block the storage. The page also works without it.
     const saved = JSON.parse(localStorage.getItem(STORE));
@@ -430,12 +431,12 @@
     ctx.globalAlpha = alpha;
     ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.strokeStyle = color; ctx.lineWidth = 1.5 * um;
     if (v.artic) {
-      // The front body, the bellows (dark) and the rear body. The polygons are in the plan frame.
+      // The front body, the bellows (dark, only a bus) and the rear body. A semitrailer has the tractor and the trailer. The polygons are in the plan frame.
       Sim.bodyPolys(p, v).forEach((poly, i) => {
         ctx.beginPath();
         poly.forEach((c, k) => (k ? ctx.lineTo(c.x, c.y) : ctx.moveTo(c.x, c.y)));
         ctx.closePath();
-        ctx.fillStyle = i === 1 ? 'rgba(70,70,70,.55)' : 'rgba(255,255,255,.75)';
+        ctx.fillStyle = i === 1 && v.kind !== 'semi' ? 'rgba(70,70,70,.55)' : 'rgba(255,255,255,.75)';
         ctx.fill(); ctx.stroke();
       });
     }
@@ -823,13 +824,27 @@
     $('vehReset').style.display = veh.preset ? '' : 'none';
   }
 
+  // The kind of a vehicle: 'rigid', 'bus' (articulated bus) or 'semi' (semitrailer).
+  const kindOf = (v) => (v.kind === 'semi' ? 'semi' : v.artic ? 'bus' : 'rigid');
+  const LABELS = {
+    bus: ['Mittelachse bis Gelenk [m]', 'Gelenk bis Hinterachse [m]', 'Überhang hinter der Hinterachse [m]', 'Max. Knickwinkel [gon]'],
+    semi: ['Hinterachse Zugmaschine bis Sattelzapfen [m] (negativ = davor)', 'Sattelzapfen bis Mitte Achsgruppe Auflieger [m]',
+           'Auflieger: Überhang hinter der Achsgruppe [m]', 'Max. Knickwinkel Zugmaschine–Auflieger [gon]']
+  };
+
   function refreshFields() {
+    const kind = kindOf(veh);
     $('v_name').value = veh.name;
     Object.keys(FIELDS).forEach((id) => { $(id).value = veh[FIELDS[id]] || 0; });
     $('v_trail').checked = !!veh.trail;
-    $('v_artic').checked = !!veh.artic;
-    $('articBox').style.display = veh.artic ? '' : 'none';
-    $('v_rear').disabled = !!veh.artic;           // For an articulated vehicle, the rear overhang is the sum of the three values.
+    $('v_kind').value = kind;
+    $('articBox').style.display = kind === 'rigid' ? 'none' : '';
+    $('semiBox').style.display = kind === 'semi' ? '' : 'none';
+    $('semiNote').style.display = kind === 'semi' && veh.preset ? '' : 'none';
+    ['l_hitch', 'l_axle2', 'l_rearOver', 'l_knick'].forEach((id, i) => { if (LABELS[kind]) $(id).textContent = LABELS[kind][i]; });
+    if (kind === 'semi') $('v_hitch').removeAttribute('min'); else $('v_hitch').setAttribute('min', '0');      // The kingpin of a semitrailer is in front of the axle.
+    $('v_rear').disabled = kind !== 'rigid';           // For an articulated vehicle, the rear overhang is the sum of the three values.
+    $('v_trail').disabled = kind !== 'rigid';
   }
 
   /* Choose the vehicle for the active driving line. */
@@ -860,9 +875,11 @@
   $('v_name').addEventListener('input', () => { veh.name = $('v_name').value || 'Fahrzeug'; renderVehicles(); renderRoutes(); saveVehicles(); });
   Object.keys(FIELDS).forEach((id) => {
     $(id).addEventListener('input', () => {
-      const v = parseFloat($(id).value);
-      // The distance of the rear axles can be 0 (one rear axle). All other values must be more than 0.
-      if (v > 0 || (FIELDS[id] === 'gap' && v >= 0)) {
+      const v = parseFloat($(id).value), fld = FIELDS[id];
+      // The distance of the rear axles can be 0 (one rear axle). The hitch of a semitrailer is negative (in front of the rear axle).
+      // All other values must be more than 0.
+      const ok = fld === 'hitch' ? isFinite(v) && (veh.kind === 'semi' || v >= 0) : fld === 'gap' ? v >= 0 : v > 0;
+      if (ok) {
         veh[FIELDS[id]] = v;
         if (veh.artic && ['hitch', 'axle2', 'rearOver'].includes(FIELDS[id])) {
           veh.rear = veh.hitch + veh.axle2 + veh.rearOver;           // The distance from the middle axle to the end.
@@ -872,13 +889,20 @@
       }
     });
   });
-  // Switch a vehicle to an articulated vehicle (a bus with a joint), or back.
-  $('v_artic').addEventListener('change', () => {
-    veh.artic = $('v_artic').checked;
-    if (veh.artic) {
-      veh.hitch = veh.hitch || 1.8; veh.axle2 = veh.axle2 || 4.2; veh.rearOver = veh.rearOver || 3.4; veh.knickGon = veh.knickGon || 65;
+  // Change the kind of the vehicle: rigid, articulated bus or semitrailer. A new kind gets its default dimensions where they are missing.
+  const BUS_DEFAULTS = { hitch: 1.8, axle2: 4.2, rearOver: 3.4, knickGon: 65 };
+  $('v_kind').addEventListener('change', () => {
+    const was = kindOf(veh), kind = $('v_kind').value;
+    veh.artic = kind !== 'rigid';
+    if (kind === 'semi') veh.kind = 'semi'; else delete veh.kind;
+    if (kind !== was && kind !== 'rigid') {
+      // The values of a bus do not fit a semitrailer and the other way round: set all of them. A rigid vehicle has none: set the missing ones.
+      const def = kind === 'semi' ? Sim.SEMI_DEFAULTS : BUS_DEFAULTS;
+      Object.keys(def).forEach((k) => { if (was !== 'rigid' || !veh[k]) veh[k] = def[k]; });
+      if (kind === 'semi' && !veh.trailerWidth) veh.trailerWidth = veh.width;
       veh.rear = veh.hitch + veh.axle2 + veh.rearOver;
     }
+    if (kind !== 'rigid') veh.trail = false;           // An articulated vehicle does not use the trailing axle.
     refreshFields(); saveVehicles(); recompute();
   });
   $('v_trail').addEventListener('change', () => { veh.trail = $('v_trail').checked; saveVehicles(); recompute(); });      // The trailing axle changes the kinematics.

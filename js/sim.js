@@ -22,7 +22,16 @@
    * artic = true for an articulated vehicle (a bus with a joint). Then hitch, axle2, rearOver and knickGon are used:
    * hitch = distance from the middle axle to the joint, axle2 = distance from the joint to the rear axle,
    * rearOver = overhang behind the rear axle, knickGon = largest articulation angle in gon.
+   * kind = 'semi' is a semitrailer combination (Sattelzug). It is an articulated vehicle too (artic = true), with a NEGATIVE hitch:
+   * the fifth wheel (kingpin) is in front of the center of the rear axles of the tractor. Then the values mean:
+   * hitch = distance from the rear axle of the tractor to the kingpin (negative = in front of the axle),
+   * axle2 = distance from the kingpin to the center of the axle group of the trailer,
+   * tractorRear = overhang of the tractor behind its rear axle, trailerFront = overhang of the trailer in front of the kingpin,
+   * rearOver = overhang of the trailer behind its axle group, trailerWidth = width of the trailer, knickGon = largest angle tractor to trailer.
    * ratio = steering ratio. It is the steering wheel angle divided by the road wheel angle. */
+  // PLACEHOLDER dimensions for the semitrailer. They are plausible values, NOT the values of the RBSV 2020. Verify against RBSV 2020, Anhang 1.
+  // Total length = front + wb + hitch + axle2 + rearOver = 1.40 + 3.80 - 0.50 + 7.70 + 4.10 = 16.50 m. knickGon = 100 is a guess, not a maker value.
+  Sim.SEMI_DEFAULTS = { hitch: -0.50, axle2: 7.70, rearOver: 4.10, tractorRear: 0.80, trailerFront: 1.70, trailerWidth: 2.55, knickGon: 100 };
   Sim.PRESETS = [
     { name: 'PKW', wb: 2.86, front: 0.92, rear: 1.10, width: 1.89, rOuter: 5.85, track: 1.60, ratio: 13, gap: 0, trail: false, preset: true },
     { name: 'LKW', wb: 5.17, front: 1.36, rear: 2.69, width: 2.30, rOuter: 9.46, track: 1.90, ratio: 20, gap: 0, trail: false, preset: true },
@@ -38,7 +47,12 @@
     // The middle axle is the rear axle of the model. rear = hitch + axle2 + rearOver is the distance from the middle axle to the end.
     // knickGon = the largest articulation angle. The value is not from the maker. It is a little more than the angle that the turning circle needs.
     { name: 'Gelenkbus 3-achsig (18 m)', wb: 5.90, front: 2.70, rear: 9.40, width: 2.55, rOuter: 11.40, track: 2.10, ratio: 20, gap: 0, trail: false,
-      artic: true, hitch: 1.79, axle2: 4.21, rearOver: 3.40, knickGon: 65, preset: true }
+      artic: true, hitch: 1.79, axle2: 4.21, rearOver: 3.40, knickGon: 65, preset: true },
+    // Semitrailer: tractor with a fifth wheel and a trailer. ALL dimensions are PLACEHOLDERS, verify against RBSV 2020, Anhang 1.
+    // The model rear axle is the center of the rear axles of the tractor. rear = hitch + axle2 + rearOver is the distance from it to the end.
+    // rOuter = 12.50 m is the outer radius of the turning circle in § 32d StVZO. It is used as a placeholder too. The values for the fifth wheel are in Sim.SEMI_DEFAULTS.
+    Object.assign({ name: 'Sattelzug 16,50 m', wb: 3.80, front: 1.40, rear: 11.30, width: 2.55, rOuter: 12.50, track: 2.05, ratio: 20, gap: 0, trail: false,
+      artic: true, kind: 'semi', preset: true }, Sim.SEMI_DEFAULTS)
   ];
   Sim.DEFAULT_VEHICLE = Object.assign({}, Sim.PRESETS[0]);
 
@@ -196,9 +210,10 @@
     return out;
   };
 
-  /* Add the rear body of an articulated vehicle (a bus with a joint) to the samples.
+  /* Add the rear body of an articulated vehicle (a bus with a joint, or a semitrailer) to the samples.
    * The front body has the front axle and the middle axle. The middle axle is the "rear axle" of the model.
    * The joint (hitch) H is on the axis of the front body, at the distance v.hitch behind the middle axle.
+   * For a semitrailer the hitch is negative: the kingpin is in front of the rear axle of the tractor. The math is the same.
    * The rear axle T of the rear body is at the distance v.axle2 behind the joint.
    * The rear axle follows the joint like the rear axle of a car follows the front axle (tractrix).
    * New values in each sample: Hx, Hy = joint, Tx, Ty = rear axle, th2 = direction of the rear body,
@@ -522,20 +537,26 @@
 
   /* Body polygon. Corner order: front left, front right, rear right, rear left. The origin is the model rear axle. */
   Sim.bodyPoly = function (smp, v) {
-    // An articulated vehicle: this is the front body. It ends at the joint.
-    const m = Sim.modelGeom(v), hw = v.width / 2, xf = m.wb + v.front, xr = v.artic ? -v.hitch : -m.rear;
+    // An articulated vehicle: this is the front body. A bus ends at the joint. The tractor of a semitrailer has its own rear overhang.
+    const m = Sim.modelGeom(v), hw = v.width / 2, xf = m.wb + v.front, xr = v.kind === 'semi' ? -v.tractorRear : v.artic ? -v.hitch : -m.rear;
     return [Sim.local(smp, xf, -hw), Sim.local(smp, xf, hw), Sim.local(smp, xr, hw), Sim.local(smp, xr, -hw)];
   };
 
+  /* Half of the width of the rear body of an articulated vehicle. */
+  Sim.rearHalfWidth = function (v) { return (v.kind === 'semi' ? v.trailerWidth : v.width) / 2; };
+
   /* All polygons of the vehicle. A normal vehicle has one polygon.
    * An articulated vehicle has three: the front body, the bellows of the joint, and the rear body.
+   * A semitrailer has two: the tractor and the trailer. The trailer goes from the kingpin + trailerFront to -rearOver.
    * All polygons have the same direction of the corners, so that the union can be drawn with one fill. */
   Sim.bodyPolys = function (smp, v) {
     const front = Sim.bodyPoly(smp, v);
     if (!v.artic) return [front];
-    const hw = v.width / 2, c = Math.cos(smp.th2), sn = Math.sin(smp.th2);
+    const hw = Sim.rearHalfWidth(v), c = Math.cos(smp.th2), sn = Math.sin(smp.th2);
     const loc2 = (x, y) => ({ x: smp.Tx + x * c - y * sn, y: smp.Ty + x * sn + y * c });      // The frame of the rear body.
-    const rear = [loc2(v.axle2, -hw), loc2(v.axle2, hw), loc2(-v.rearOver, hw), loc2(-v.rearOver, -hw)];
+    const xf2 = v.kind === 'semi' ? v.axle2 + v.trailerFront : v.axle2;                        // The front of the rear body.
+    const rear = [loc2(xf2, -hw), loc2(xf2, hw), loc2(-v.rearOver, hw), loc2(-v.rearOver, -hw)];
+    if (v.kind === 'semi') return [front, rear];                                              // No bellows.
     const bellows = [Sim.local(smp, -v.hitch, -hw), Sim.local(smp, -v.hitch, hw), loc2(v.axle2, hw), loc2(v.axle2, -hw)];
     return [front, bellows, rear];
   };
@@ -546,15 +567,18 @@
    * The next points are the side points at the rigid axle of each rigid body: (0, -hw) and (0, +hw), front body first.
    * The center of rotation (ICR) of a rigid body is on the line of its rigid axle. The nearest point of the inner side
    * is the foot of the perpendicular from the ICR to this side. It is always at the x position of the rigid axle.
-   * The corners give the outer lines. The side points give the inner lines. Use Sim.trailInfo for the meaning of each point. */
+   * The corners give the outer lines. The side points give the inner lines.
+   * For a semitrailer, four more corners follow: the rear corners of the tractor and the front corners of the trailer.
+   * Use Sim.trailInfo for the meaning of each point. */
   Sim.trailPoints = function (smp, v) {
     const p = Sim.bodyPolys(smp, v), hw = v.width / 2, last = p[p.length - 1];
     const pts = v.artic ? [p[0][0], p[0][1], last[2], last[3]] : p[0].slice();
     pts.push(Sim.local(smp, 0, -hw), Sim.local(smp, 0, hw));
     if (v.artic) {
-      const c = Math.cos(smp.th2), sn = Math.sin(smp.th2);      // The rear body: the frame is at the rear axle T with the direction th2.
-      pts.push({ x: smp.Tx + hw * sn, y: smp.Ty - hw * c }, { x: smp.Tx - hw * sn, y: smp.Ty + hw * c });
+      const c = Math.cos(smp.th2), sn = Math.sin(smp.th2), hw2 = Sim.rearHalfWidth(v);      // The rear body: the frame is at the rear axle T with the direction th2.
+      pts.push({ x: smp.Tx + hw2 * sn, y: smp.Ty - hw2 * c }, { x: smp.Tx - hw2 * sn, y: smp.Ty + hw2 * c });
     }
+    if (v.kind === 'semi') pts.push(p[0][2], p[0][3], p[1][0], p[1][1]);
     return pts;
   };
 
@@ -563,6 +587,7 @@
   Sim.trailInfo = function (v) {
     const info = [{ kind: 'corner' }, { kind: 'corner' }, { kind: 'corner' }, { kind: 'corner' }];
     for (let b = 0; b < (v.artic ? 2 : 1); b++) info.push({ kind: 'side', body: b, side: -1 }, { kind: 'side', body: b, side: 1 });
+    if (v.kind === 'semi') for (let k = 0; k < 4; k++) info.push({ kind: 'corner' });
     return info;
   };
 
@@ -623,7 +648,7 @@
       for (let i = 0; i <= n2; i++) { const a = i * st2 / lim2.rFront; c2.push({ x: lim2.rFront * Math.cos(a), y: lim2.rFront * Math.sin(a) }); }
       const r2 = Sim.run(c2, veh2).slice(Math.floor(n2 * 0.8));
       const rh2 = hyp(lim2.rRear, veh2.artic ? veh2.hitch : 0), hw2 = veh2.width / 2;
-      const expect = Math.min(lim2.rRear, veh2.artic ? Math.sqrt(rh2 * rh2 - veh2.axle2 * veh2.axle2) : Infinity) - hw2;
+      const expect = Math.min(lim2.rRear - hw2, veh2.artic ? Math.sqrt(rh2 * rh2 - veh2.axle2 * veh2.axle2) - Sim.rearHalfWidth(veh2) : Infinity);
       let minSide = Infinity, minCorner = Infinity, minEdge = Infinity, maxPoint = 0;
       for (const q of r2) {
         const tp = Sim.trailPoints(q, veh2);
@@ -637,6 +662,28 @@
       }
       add(veh2.name + ': innere Hüllkurve = Achsradius − halbe Breite (' + expect.toFixed(2) + ' m)', Math.abs(minSide - expect) < 0.01,
         'Seitenpunkte ' + minSide.toFixed(3) + ' m, nur Ecken ' + minCorner.toFixed(3) + ' m');
+      // The single nonzero fill must give the union of all polygons. Test it on a grid of points at the last sample, which is in a turn:
+      // where a polygon covers a point, the sum of the winding numbers of all polygons must not be 0.
+      // (The bellows of a bus is a bow tie. Its reversed part is inside the overlap of both bodies, so the sum stays more than 0.)
+      const polysU = Sim.bodyPolys(r2[r2.length - 1], veh2), all = [].concat(...polysU);
+      const winding = (poly, x, y) => {
+        let w = 0;
+        for (let k = 0; k < poly.length; k++) {
+          const a = poly[k], b = poly[(k + 1) % poly.length], side = (b.x - a.x) * (y - a.y) - (x - a.x) * (b.y - a.y);
+          if (a.y <= y && b.y > y && side > 0) w++; else if (a.y > y && b.y <= y && side < 0) w--;
+        }
+        return w;
+      };
+      const x0 = Math.min(...all.map((q) => q.x)), x1 = Math.max(...all.map((q) => q.x)), y0 = Math.min(...all.map((q) => q.y)), y1 = Math.max(...all.map((q) => q.y));
+      let holes = 0, covered = 0;
+      for (let gx = x0; gx <= x1; gx += 0.1) {
+        for (let gy = y0; gy <= y1; gy += 0.1) {
+          const ws = polysU.map((poly) => winding(poly, gx, gy));
+          if (ws.some((w) => w !== 0)) { covered++; if (ws.reduce((a, b) => a + b, 0) === 0) holes++; }
+        }
+      }
+      add(veh2.name + ': ein Nonzero-Fill ergibt die Vereinigung der Karosserieflächen, Hüllpunkte passen zur Beschreibung',
+        holes === 0 && covered > 100 && Sim.trailPoints(r2[0], veh2).length === Sim.trailInfo(veh2).length, covered + ' Rasterpunkte, ' + holes + ' Löcher, ' + polysU.length + ' Polygone, ' + Sim.trailInfo(veh2).length + ' Hüllpunkte');
       add(veh2.name + ': kein Punkt der Karosseriekanten liegt weiter innen', minEdge >= expect - 0.001, 'kleinster Abstand der Kanten ' + minEdge.toFixed(3) + ' m');
       // The turning circle rOuter must fit to the dimensions. At full lock, the outermost point of all bodies is at rOuter.
       add(veh2.name + ': Vollausschlag: äußerster Punkt aller Karosserien = Wendekreis ' + veh2.rOuter + ' m', Math.abs(maxPoint - veh2.rOuter) < 0.02,
@@ -794,7 +841,7 @@
 
     // The articulated bus: the rear body follows the joint. The distance joint to rear axle is always the same.
     // In a long turn at full lock, the articulation angle and the radius of the rear axle are the values that the geometry gives.
-    const bus = Sim.PRESETS.find((b) => b.artic), ob = Sim.driveOpts(bus), limB = Sim.steerLimit(bus);
+    const bus = Sim.PRESETS.find((b) => b.artic && b.kind !== 'semi'), ob = Sim.driveOpts(bus), limB = Sim.steerLimit(bus);
     const busStraight = Sim.buildRoute([pt(0, 0), pt(40, 0)], bus, ob);
     add('Gelenkbus: Geradeausfahrt, Knickwinkel 0', !busStraight.fail && busStraight.smp.every((q) => Math.abs(q.phi) < 1e-9), '');
     const busTurn = Sim.makeTurn([pt(0, 0), pt(40, 0)], 1, 1.9 * Math.PI, 0, bus, ob);
@@ -815,6 +862,26 @@
     add('Gelenkbus: ein zu kleiner Knickwinkel-Grenzwert wird erkannt', !!busLowRun.fail && busLowRun.fail.kind === 'knick',
       busLowRun.fail && busLowRun.fail.maxPhi ? Sim.gon(busLowRun.fail.maxPhi).toFixed(1) + ' gon > ' + busLow.knickGon + ' gon' : '');
 
+    // The semitrailer: the math of the articulated bus with a negative hitch (the kingpin is in front of the rear axle of the tractor).
+    // The values are placeholders (see Sim.PRESETS). The test checks the model, not the dimensions.
+    const semi = Sim.PRESETS.find((b) => b.kind === 'semi'), oS = Sim.driveOpts(semi), limS = Sim.steerLimit(semi);
+    const semiStraight = Sim.buildRoute([pt(0, 0), pt(40, 0)], semi, oS);
+    add('Sattelzug: Geradeausfahrt, Knickwinkel 0', !semiStraight.fail && semiStraight.smp.every((q) => Math.abs(q.phi) < 1e-9), '');
+    // A sweep of 4 pi (two revolutions) reaches the steady state.
+    const semiTurn = Sim.makeTurn([pt(0, 0), pt(40, 0)], 1, 4 * Math.PI, 0, semi, oS);
+    let kingErr = 0, kingAhead = Infinity, phiS = 0, rTS = 0;
+    semiTurn.run.smp.forEach((q, i, a) => {
+      kingErr = Math.max(kingErr, Math.abs(hyp(q.Hx - q.Tx, q.Hy - q.Ty) - semi.axle2));
+      kingAhead = Math.min(kingAhead, (q.Hx - q.Rx) * Math.cos(q.th) + (q.Hy - q.Ry) * Math.sin(q.th));
+      if (i > a.length * 0.8) { phiS = Math.max(phiS, Math.abs(q.phi)); rTS = Math.max(rTS, Math.abs(hyp(q.Tx - 40, q.Ty - limS.rFront) - Math.sqrt(hyp(limS.rRear, semi.hitch) ** 2 - semi.axle2 ** 2))); }
+    });
+    add('Sattelzug: Sattelzapfen vor der Hinterachse, Abstand Zapfen–Achsgruppe konstant', !semiTurn.run.fail && kingAhead > 0.4 && kingErr < 1e-9,
+      'Zapfen ' + kingAhead.toFixed(2) + ' m vor der Achse, Abweichung ' + kingErr.toExponential(1) + ' m');
+    add('Sattelzug: Knickwinkel bei vollem Einschlag = Geometrie (' + Sim.gon(Sim.articSteady(semi)).toFixed(1) + ' gon)',
+      Math.abs(phiS - Sim.articSteady(semi)) < Math.PI / 200 * 1.5, 'Simulation ' + Sim.gon(phiS).toFixed(2) + ' gon');
+    const rTAnalytic = Math.sqrt(hyp(limS.rRear, semi.hitch) ** 2 - semi.axle2 ** 2);
+    add('Sattelzug: Radius der Achsgruppe = √(R0² + M² − L1²) (' + rTAnalytic.toFixed(2) + ' m)', rTS < 0.02, 'max. Abweichung ' + (rTS * 1000).toFixed(1) + ' mm');
+    add('Sattelzug: der Grenzwert für den Knickwinkel reicht für den Wendekreis', semi.knickGon * Math.PI / 200 >= Sim.articSteady(semi), 'Grenze ' + semi.knickGon + ' gon');
     // Turn by angle (the turn template of the RBSV, the corner path of AutoTURN).
     // A turn with 200 gon is a turn around in one movement. The radius is the minimum turning circle.
     for (const veh2 of Sim.PRESETS) {

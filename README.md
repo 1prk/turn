@@ -70,6 +70,7 @@ Voreinstellungen (Maße in m, Überhang hinten und Radstand beziehen sich bei me
 | Müllfahrzeug 3-achsig | 9,90 | 4,77 | 1,53 | 3,60 | 2,55 | 10,25 | 38,9 gon |
 | Müllfahrzeug 3-achsig Nachlaufachse (*) | 9,95 | 4,575 | 1,35 | 4,025 | 2,55 | 8,60 | 39,1 gon |
 | Gelenkbus 3-achsig (18 m) | 18,00 | 5,90 | 2,70 | 9,40 (ab Mittelachse) | 2,55 | 11,40 | 48,4 gon |
+| Sattelzug 16,50 m (**Platzhalter**) | 16,50 | 3,80 | 1,40 | 11,30 (ab Hinterachse der Zugmaschine bis Ende Auflieger) | 2,55 | 12,50 | 22,9 gon |
 
 Die Fahrzeuge mit drei Achsen werden mit drei Achsen gezeichnet. Die Hinterachse im Modell ist die Mitte der beiden
 hinteren Achsen. Der **Abstand der Hinterachsen** (1,35 m) ist eine Annahme. Er wirkt nur auf die Darstellung, außer bei
@@ -106,6 +107,34 @@ Ecken der vorderen und den hinteren Ecken der hinteren Karosserie.
   werden bei zu kleinem Grenzwert als ungültig markiert.
 - Die Wende in einem Zug (Taste W) braucht beim Gelenkbus mindestens 2 · R = 17,13 m Platz in der Breite.
 - Eigene Gelenkfahrzeuge: Fahrzeug kopieren (+), Haken „Gelenkfahrzeug“, Maße eintragen.
+
+## Sattelzug (Sattelkupplung)
+Der Sattelzug ist das maßgebende Fahrzeug an Knotenpunkten. Mathematisch ist er der Gelenkbus mit **negativem Hitch**: Der
+Sattelzapfen liegt **vor** der Mitte der Hinterachsen der Zugmaschine. Es gelten dieselben Formeln, `Sim.articSteady`
+behandelt das Vorzeichen: Knickwinkel `γ = atan(M / R0) + asin(L1 / √(R0² + M²))` und Radienkette
+`R0 → √(R0² + M²)` (Sattelzapfen) `→ √(R0² + M² − L1²)` (Achsgruppe des Aufliegers) mit `M` = Hinterachse bis Sattelzapfen
+(negativ), `L1` = Sattelzapfen bis Mitte Achsgruppe. Die Achsgruppe des Aufliegers folgt dem Sattelzapfen starr (Traktrix).
+Bauart wählen im Feld „Bauart“ (Starres Fahrzeug / Gelenkbus / Sattelzug). Felder des Sattelzugs:
+
+| Feld | Bedeutung |
+|---|---|
+| Hinterachse Zugmaschine bis Sattelzapfen | `hitch`, **negativ** = vor der Hinterachse (Eingabe von negativen Werten ist erlaubt) |
+| Sattelzapfen bis Mitte Achsgruppe | `axle2` |
+| Zugmaschine: Überhang hinter der Hinterachse | `tractorRear` |
+| Auflieger: Überhang vor dem Sattelzapfen | `trailerFront` |
+| Auflieger: Überhang hinter der Achsgruppe | `rearOver` |
+| Auflieger: Breite | `trailerWidth` |
+| Max. Knickwinkel Zugmaschine–Auflieger | `knickGon` |
+
+Es gibt zwei Karosserien ohne Faltenbalg: das Rechteck der Zugmaschine und das Rechteck des Aufliegers (vom Sattelzapfen
++ Überhang vorn bis zum Heck, im Rahmen des Aufliegers). Die Umlaufrichtung beider Polygone ist gleich, damit die
+einfache Nonzero-Füllung die Vereinigung ergibt (im Selbsttest auf einem Raster geprüft). Die Hüllkurven laufen an allen
+Ecken beider Karosserien und an den inneren Seitenpunkten an beiden starren Achsen (Zugmaschine und Achsgruppe).
+
+**Alle Maße der Voreinstellung „Sattelzug 16,50 m“ sind PLATZHALTER**, plausible Annahmen und **keine** Werte der RBSV 2020
+(Gesamtlänge 16,50 m = 1,40 + 3,80 − 0,50 + 7,70 + 4,10; Wendekreisradius 12,50 m wie der Außenradius des Kraftkreises
+nach § 32d StVZO; Knickwinkel-Grenze 100 gon geraten). Vor dem Einsatz mit **RBSV 2020, Anhang 1** abgleichen. Im Code
+stehen sie in `Sim.SEMI_DEFAULTS` und `Sim.PRESETS`. Mit diesen Platzhaltern braucht der Wendekreis 52,0 gon Knickwinkel.
 
 ## Fahrkurven
 Wie bei den Fahrzeugen gibt es in Abschnitt 4 eine Liste von **Fahrkurven** mit **+**. Jede Fahrkurve hat eigene Punkte
@@ -146,7 +175,7 @@ Wendekreisradius außen 5,85 m (äußerste Karosserieecke bei Vollausschlag) →
 
 ## Modell
 Kinematisches Einspurmodell, die Hinterachse folgt zwangsgeführt. Nur Vorwärtsfahrt. Der Button „Kinematik prüfen“ führt Selbsttests aus
-(Kreisfahrt, Wendekreis, innere Hüllkurve, Nachlaufachse, Geradeausfahrt, Maßstab, Fahrweise 1: Tangentialität, Mindestradius, Radius wächst mit Abstand, Zielpunkt-Begrenzung, LKW); auch per `node -e "console.log(require('./js/sim.js').selfTest().filter(r => !r.ok))"` (leere Liste = alles bestanden).
+(Kreisfahrt, Wendekreis, innere Hüllkurve, Nachlaufachse, Sattelzug, Geradeausfahrt, Maßstab, Fahrweise 1: Tangentialität, Mindestradius, Radius wächst mit Abstand, Zielpunkt-Begrenzung, LKW); auch per `node -e "console.log(require('./js/sim.js').selfTest().filter(r => !r.ok))"` (leere Liste = alles bestanden).
 
 ## Aufbau
 - `index.html` – Oberfläche

@@ -27,6 +27,7 @@
     pos: 0, playing: false,
     valid: 0,                           // The number of points that the vehicle can drive.
     seg: 'line',                        // The type of the next part: 'line' (straight line, corner), 'arc' (arc through the point) or 'turn' (turn by angle).
+    fw: 1,                              // The driving style of the active line: 1 (steering while driving) or 2 (steering when the vehicle stands, kink in the guide line).
     turnGon: 200,                       // The change of direction of a turn [gon]. 200 gon is a turn around.
     turnR: 0,                           // The radius of a turn [m]. 0 means the minimum turning circle.
     mouse: null, res: null,
@@ -62,7 +63,7 @@
   /* ---------- driving lines ---------- */
   // Each driving line has its own points and its own vehicle. The line that the user edits is the active line.
   const ROUTE_COLORS = [null, '#ea580c', '#9333ea', '#0d9488', '#db2777', '#65a30d'];      // The active line has the standard colors.
-  function newRoute(name) { return { name: name, veh: veh, start: null, wps: [], pos: 1, res: null, valid: 0 }; }
+  function newRoute(name, fw) { return { name: name, veh: veh, start: null, wps: [], pos: 1, res: null, valid: 0, fw: fw === 2 ? 2 : 1 }; }
   S.routes = [newRoute('Fahrkurve 1')];
 
   /* ---------- view helpers ---------- */
@@ -94,7 +95,7 @@
     S.exported = false; S.note = null;
     S.start = null; S.pend = null; S.wps = []; S.prev = null;
     S.pos = 1; S.playing = false;
-    S.routes = [newRoute('Fahrkurve 1')]; S.ri = 0;
+    S.routes = [newRoute('Fahrkurve 1')]; S.ri = 0; S.fw = 1;
     $('pos').value = 1000;
     renderRoutes();
   }
@@ -174,8 +175,8 @@
   /* ---------- calculation ---------- */
   /* Calculate one driving line with its vehicle v.
    * Return { res, valid }: the result for the drawing (or null) and the number of points that the vehicle can drive. */
-  function computeRoute(start, wps, v) {
-    const lim = Sim.steerLimit(v), o = Sim.driveOpts(v);
+  function computeRoute(start, wps, v, fw) {
+    const lim = Sim.steerLimit(v), o = Sim.driveOpts(v, fw);
     if (!S.mpp || !start || !lim) return { res: null, valid: wps.length };
     // Draw only the part of the route that the vehicle can drive.
     // A point after a line that is too short is not valid.
@@ -198,12 +199,12 @@
 
   function recompute() {
     S.prev = null;
-    const c = computeRoute(S.start, S.wps, veh);
+    const c = computeRoute(S.start, S.wps, veh, S.fw);
     S.res = c.res; S.valid = c.valid;
     // The other driving lines do not change, but their results depend on the scale and on the vehicles.
     S.routes.forEach((r, i) => {
       if (i === S.ri) return;
-      const o = computeRoute(r.start, r.wps, r.veh);
+      const o = computeRoute(r.start, r.wps, r.veh, r.fw);
       r.res = o.res; r.valid = o.valid;
     });
     updatePreview();
@@ -226,7 +227,7 @@
     S.prev = null;
     const R = S.res;
     if (R && S.tool === 'drive' && S.mouse && !drag && S.valid === S.wps.length) {
-      const m = S.mpp, o = Sim.driveOpts(veh), route = routeM(null), mouse = { x: S.mouse.x * m, y: S.mouse.y * m };
+      const m = S.mpp, o = Sim.driveOpts(veh, S.fw), route = routeM(null), mouse = { x: S.mouse.x * m, y: S.mouse.y * m };
       let run, target, clamped;
       if (S.seg === 'turn') {
         // The side of the mouse (left or right of the vehicle) gives the direction of the turn.
@@ -330,8 +331,10 @@
     if (!R || !S.start) return rows;
     rows.push(['Weglänge', f(R.length, 1) + ' m']);
     rows.push(['Richtungsänderung', f(Math.abs(gon(R.turn)), 1) + ' gon ' + (Math.abs(R.turn) < 1e-3 ? '' : R.turn > 0 ? '(rechts)' : '(links)')]);
+    rows.push(['Fahrweise', S.fw === 2 ? '2 · Lenken im Stand' : '1 · Lenken während der Fahrt']);
+    if (S.fw === 2) rows.push(['Knick der Leitlinie am Bogen', f(gon(R.lim.delta), 1) + ' gon (RBSV: ca. 40 gon, Busse 55 gon)']);
     rows.push(['Max. Lenkwinkel', f(gon(R.maxD), 1) + ' gon von ' + f(gon(R.lim.delta), 1) + ' gon']);
-    rows.push(['Lenkung am Anschlag', R.satLen > 0.01 ? '<span class="warn">' + f(R.satLen, 1) + ' m</span>' : 'nein']);
+    if (S.fw === 1) rows.push(['Lenkung am Anschlag', R.satLen > 0.01 ? '<span class="warn">' + f(R.satLen, 1) + ' m</span>' : 'nein']);
     if (veh.artic) rows.push(['Knickwinkel max.', f(gon(R.maxPhi), 1) + ' gon von ' + f(veh.knickGon, 1) + ' gon']);
     rows.push(['Wendekreis ⌀ (Platzbedarf einer Wende)', f(2 * veh.rOuter, 2) + ' m']);
     if (R.lastArc && Math.abs(gon(R.lastArc.delta)) >= 150) rows.push(['Querversatz der Leitlinie 2R', f(2 * R.lastArc.R, 2) + ' m (nur die Leitlinie)']);
@@ -382,9 +385,21 @@
     return null;
   }
 
-  const SEG_HELP = { line: 'Geraden mit einem Bogen an jeder Ecke. Je weiter die Punkte auseinander liegen, desto größer die Kurve.',
-    arc: 'Ein Kreisbogen vom Ende der Fahrlinie durch den Punkt an der Maus. Liegt der Punkt gegenüber, entsteht ein Halbkreis.',
-    turn: 'Ein Bogen mit der Richtungsänderung in gon (RBSV-Schablone). 200 gon sind eine Wende in einem Zug.' };
+  const SEG_HELP = {
+    1: { line: 'Geraden mit einem Bogen an jeder Ecke. Je weiter die Punkte auseinander liegen, desto größer die Kurve.',
+         arc: 'Ein Kreisbogen vom Ende der Fahrlinie durch den Punkt an der Maus. Liegt der Punkt gegenüber, entsteht ein Halbkreis.',
+         turn: 'Ein Bogen mit der Richtungsänderung in gon (RBSV-Schablone). 200 gon sind eine Wende in einem Zug.' },
+    2: { line: 'Geraden. An jeder Ecke lenkt das Fahrzeug im Stand bis zum Anschlag ein und dreht sich um einen festen Punkt. Die Geraden brauchen dafür eine Mindestlänge.',
+         arc: 'Ein Kreisbogen durch den Punkt an der Maus, mit Knick am Anfang. Der Radius ergibt sich aus dem Punkt, nie unter dem Wendekreis.',
+         turn: 'Lenken im Stand und ein Bogen mit der Richtungsänderung in gon. 200 gon sind eine Wende in einem Zug.' } };
+
+  /* The text about the driving style. In style 2, the kink is the steering angle that the vehicle makes in the stand. */
+  function fwHelp() {
+    const lim = Sim.steerLimit(veh);
+    return S.fw === 2 ? 'Das Fahrzeug lenkt im Stand bis zum Anschlag ein und fährt dann an. Die Leitlinie hat am Bogen einen Knick von ' + (lim ? f(gon(lim.delta), 1) : '–') +
+      ' gon (RBSV: ca. 40 gon, Busse ohne Gelenkbusse 55 gon). Das Fahrzeug dreht sich um einen festen Punkt.'
+      : 'Das Fahrzeug lenkt während der Fahrt ein. Geraden und Bögen schließen tangential an, die Leitlinie hat keinen Knick.';
+  }
 
   /* What the user can do now: { kind: 'info' | 'ok' | 'warn', title, text, cue }. The cue is the short text at the top of the plan. */
   function promptFor(n) {
@@ -410,7 +425,7 @@
       if (P && P.clamped) return { kind: 'warn', title: 'Weiter geht es dort nicht', text: 'Ein Klick setzt den nächstmöglichen Punkt (orange).', cue: 'Weiter geht es dort nicht: Punkt wird begrenzt' };
       return S.seg === 'arc' ? { kind: 'info', title: 'Punkt für den Bogen klicken', text: 'Der Bogen geht vom Ende der Fahrlinie durch den Punkt an der Maus.', cue: 'Klick: Punkt, durch den der Bogen geht' }
         : S.seg === 'turn' ? { kind: 'info', title: 'Kurve setzen', text: 'Die Maus links oder rechts vom Fahrzeug wählt die Drehrichtung. Richtungsänderung und Radius stehen darunter.', cue: 'Klick: Kurve setzen (Maus links/rechts = Drehrichtung)' }
-        : { kind: 'info', title: 'Nächsten Punkt klicken', text: 'An jedem Eckpunkt entsteht ein Bogen. Zurücknehmen mit ⌫.', cue: 'Klick: nächster Punkt' };
+        : { kind: 'info', title: 'Nächsten Punkt klicken', text: S.fw === 2 ? 'An jedem Eckpunkt lenkt das Fahrzeug im Stand bis zum Anschlag ein (Knick). Zurücknehmen mit ⌫.' : 'An jedem Eckpunkt entsteht ein Bogen. Zurücknehmen mit ⌫.', cue: 'Klick: nächster Punkt' };
     }
     if (n === 5) {
       if (R && R.fail) return { kind: 'warn', title: 'Die Fahrlinie ist nicht fahrbar', text: failText(R.fail), cue: '' };
@@ -424,7 +439,7 @@
     if (n === 1) return !S.hasPage ? 'noch kein Plan geladen' : S.fileName ? S.fileName + (S.numPages > 1 ? ' · Seite ' + S.pageNo + ' von ' + S.numPages : '') : 'Leere Fläche (Test)';
     if (n === 2) return S.mpp && S.scaleDone ? '1 m = ' + f(1 / S.mpp, 2) + ' pt · ca. 1:' + Math.round(1000 * S.mpp / 0.352778) : 'noch nicht gesetzt';
     if (n === 3) return veh.name + ' · Wendekreis ⌀ ' + f(2 * veh.rOuter, 2) + ' m';
-    if (n === 4) return !S.start ? 'noch keine Fahrlinie' : S.routes[S.ri].name + ' · ' + S.wps.length + ' Punkte' + (S.res ? ' · ' + f(S.res.length, 1) + ' m' : '');
+    if (n === 4) return !S.start ? 'noch keine Fahrlinie' : S.routes[S.ri].name + ' · Fahrweise ' + S.fw + ' · ' + S.wps.length + ' Punkte' + (S.res ? ' · ' + f(S.res.length, 1) + ' m' : '');
     if (n === 5) return S.exported ? 'exportiert' : 'Abspielen, Anzeige, Export';
     return 'Selbsttest, Hilfslinien';
   }
@@ -443,7 +458,8 @@
       c.push('Bogen R = <b>' + f(P.lastArc.R, 1) + ' m</b> · ' + f(Math.abs(gon(P.lastArc.delta)), 1) + ' gon');
       if (Math.abs(gon(P.lastArc.delta)) >= 150) c.push('Querversatz 2R = <b>' + f(2 * P.lastArc.R, 2) + ' m</b> (Platzbedarf etwa ⌀ ' + f(2 * veh.rOuter, 2) + ' m)');
     }
-    if (A.satLen > 0.01) c.push('<span class="w">⚠ Anschlag ' + f(A.satLen, 1) + ' m</span>');
+    if (S.fw === 2) c.push('Fahrweise <b>2</b> · Knick <b>' + f(gon(lim.delta), 1) + '</b> gon');
+    else if (A.satLen > 0.01) c.push('<span class="w">⚠ Anschlag ' + f(A.satLen, 1) + ' m</span>');
     return c.map((x) => '<span>' + x + '</span>').join('');
   }
 
@@ -475,7 +491,10 @@
     $('tools').hidden = !S.hasPage;
     $('undoBtn').disabled = !(S.tool === 'drive' ? S.pend || S.start : S.tool === 'scale' && !S.scaleDone && S.scalePts.length);
     document.querySelectorAll('[data-seg]').forEach((b) => b.classList.toggle('on', b.dataset.seg === S.seg));
-    setText($('segHelp'), SEG_HELP[S.seg]);
+    setText($('segHelp'), SEG_HELP[S.fw][S.seg]);
+    document.querySelectorAll('[data-fw]').forEach((b) => b.classList.toggle('on', +b.dataset.fw === S.fw));
+    setText($('fwHelp'), fwHelp());
+    setText($('dupRoute'), '⧉ Mit Fahrweise ' + (S.fw === 2 ? 1 : 2) + ' duplizieren'); $('dupRoute').disabled = !S.start;
     $('turnRow').hidden = S.seg !== 'turn';
     ['png', 'dxf', 'svg', 'play'].forEach((id) => { $(id).disabled = !(S.res && S.start && S.wps.length); });
   }
@@ -609,7 +628,7 @@
     if ($('oSil').checked) { ctx.strokeStyle = 'rgba(30,40,60,.5)'; ctx.stroke(A.sil); }
     if ($('oRear').checked) { ctx.strokeStyle = '#6b7280'; ctx.setLineDash([4 * um, 3 * um]); ctx.stroke(A.rear); }
     ctx.strokeStyle = ok ? '#111' : '#c2410c'; ctx.lineWidth = 1.5 * um; ctx.setLineDash([]); ctx.stroke(A.front);
-    ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 4 * um; ctx.stroke(A.sat);   // The steering is at the stop.
+    if (S.fw === 1) { ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 4 * um; ctx.stroke(A.sat); }   // The steering is at the stop. In style 2 this is the normal case.
     drawVehicle(P ? P.end : R.smp[sampleIndex()], um, P ? 0.75 : 1);
     if ($('oIcr').checked && S.step >= 4) drawIcr(P ? P.end : R.smp[sampleIndex()], um);
     ctx.restore();
@@ -982,6 +1001,8 @@
 
   /* ---------- controls ---------- */
   document.querySelectorAll('[data-seg]').forEach((b) => b.addEventListener('click', () => setSeg(b.dataset.seg)));
+  document.querySelectorAll('[data-fw]').forEach((b) => b.addEventListener('click', () => setFw(+b.dataset.fw)));
+  $('dupRoute').addEventListener('click', duplicateRoute);
   $('wende').addEventListener('click', () => { $('turnGon').value = 200; S.turnGon = 200; setSeg('turn'); });
 
   // The steps: a click on a header, on the progress bar or on a button with data-go goes to the step.
@@ -1159,7 +1180,7 @@
     S.routes.forEach((r, i) => {
       const b = document.createElement('button');
       b.className = 'chip' + (i === S.ri ? ' on' : '');
-      b.textContent = r.name + ' · ' + r.veh.name;
+      b.textContent = r.name + ' · ' + r.veh.name + (r.fw === 2 ? ' · FW 2' : '');
       b.title = 'Fahrkurve wählen';
       const col = ROUTE_COLORS[i % ROUTE_COLORS.length];
       if (col && i !== S.ri) b.style.borderLeft = '5px solid ' + col;
@@ -1186,10 +1207,26 @@
     saveRoute();
     S.ri = i;
     const r = S.routes[i];
-    S.start = r.start; S.wps = r.wps; S.pos = r.pos; S.pend = null; S.playing = false;
+    S.start = r.start; S.wps = r.wps; S.pos = r.pos; S.pend = null; S.playing = false; S.fw = r.fw;
     veh = r.veh; selIdx = Math.max(0, vehicles.indexOf(veh));
     $('pos').value = Math.round(S.pos * 1000);
     refreshFields(); renderVehicles(); renderRoutes(); recompute();
+  }
+
+  /* Set the driving style of the active line: 1 or 2. The line is calculated again. */
+  function setFw(n) {
+    S.fw = n === 2 ? 2 : 1; S.routes[S.ri].fw = S.fw; S.note = null;
+    renderRoutes(); recompute();
+  }
+
+  /* A copy of the active line with the other driving style. It is the quick way to compare the two styles. */
+  function duplicateRoute() {
+    if (!S.start) return;
+    saveRoute();
+    const src = S.routes[S.ri], fw = src.fw === 2 ? 1 : 2, r = newRoute(src.name + ' (Kopie)', fw);
+    r.veh = src.veh; r.start = { p: { x: src.start.p.x, y: src.start.p.y } }; r.wps = src.wps.map((w) => Object.assign({}, w));
+    S.routes.push(r);
+    selectRoute(S.routes.length - 1);
   }
 
   function addRoute() {
@@ -1207,7 +1244,7 @@
     const i = Math.max(0, S.ri - 1);
     S.ri = i;                                   // The working fields now belong to a line that does not exist.
     const r = S.routes[i];
-    S.start = r.start; S.wps = r.wps; S.pos = r.pos; S.pend = null; S.playing = false;
+    S.start = r.start; S.wps = r.wps; S.pos = r.pos; S.pend = null; S.playing = false; S.fw = r.fw;
     veh = r.veh; selIdx = Math.max(0, vehicles.indexOf(veh));
     $('pos').value = Math.round(S.pos * 1000);
     refreshFields(); renderVehicles(); renderRoutes(); recompute();
@@ -1268,7 +1305,7 @@
     if (R.lastArc) arcs.push('letzter Bogen: R = ' + f(R.lastArc.R, 1) + ' m, ' + f(Math.abs(gon(R.lastArc.delta)), 1) + ' gon');
     const minR = minGuideRadius(R.smp), t = [];
     t.push('Schleppkurve ' + S.routes[S.ri].name + ' · Fahrzeug ' + v.name);
-    t.push('Fahrweise 1 · Leitlinie = Mitte der Vorderachse (nicht die Karosserie)');
+    t.push('Fahrweise ' + S.fw + (S.fw === 2 ? ' (Lenken im Stand bis zum Anschlag, Knick der Leitlinie am Bogen ' + f(gon(lim.delta), 1) + ' gon)' : ' (Lenken während der Fahrt)') + ' · Leitlinie = Mitte der Vorderachse (nicht die Karosserie)');
     t.push('Wendekreisradius außen ' + f(v.rOuter, 2) + ' m (Durchmesser ' + f(2 * v.rOuter, 2) + ' m) · Radius Vorderachse min. ' + f(lim.rFront, 2) + ' m · max. Lenkwinkel ' + f(gon(lim.delta), 1) + ' gon');
     t.push('Richtungsänderung ' + f(Math.abs(gon(R.turn)), 1) + ' gon ' + (Math.abs(R.turn) < 1e-3 ? '' : R.turn > 0 ? '(rechts)' : '(links)') + ' · Weglänge ' + f(R.length, 1) + ' m · max. Lenkwinkel ' + f(gon(R.maxD), 1) + ' gon' +
       (isFinite(minR) ? ' · kleinster Radius der Leitlinie ' + f(minR, 1) + ' m' : ''));
@@ -1340,7 +1377,7 @@
   });
 
   window.addEventListener('resize', resize);
-  window.Turn = { S: S, get veh() { return veh; }, vehicles: vehicles, selectVehicle: selectVehicle, selectRoute: selectRoute, addRoute: addRoute, setSeg: setSeg, recompute: recompute, finishScale: finishScale, setTool: setTool, updatePreview: updatePreview, goStep: goStep };
+  window.Turn = { S: S, get veh() { return veh; }, vehicles: vehicles, selectVehicle: selectVehicle, selectRoute: selectRoute, addRoute: addRoute, setSeg: setSeg, setFw: setFw, recompute: recompute, finishScale: finishScale, setTool: setTool, updatePreview: updatePreview, goStep: goStep };
   refreshFields(); renderVehicles(); renderRoutes();
   resize(); goStep(1);
 })();

@@ -23,7 +23,8 @@ Voraussetzung, sagt der Schritt, was fehlt, und bietet einen Button dorthin an. 
    größtmögliche Kurve **begrenzt** (orange): So sieht man, wie weit das Fahrzeug kommt. Ein Klick setzt den begrenzten
    Punkt. Punkte sind ziehbar (Rechtsklick löscht). Ein Ziehen, das die Linie unfahrbar machen würde, springt zurück. Wird
    eine bestehende Linie durch einen Fahrzeugwechsel unfahrbar, wird nur der fahrbare Teil gezeichnet, die übrigen Punkte
-   sind rot markiert. Mehrere Fahrkurven: Reiter oben im Schritt, **+** legt eine neue an. Unten im Plan stehen die
+   sind rot markiert. Der Schalter „Fahrweise“ wählt Fahrweise 1 (Lenken während der Fahrt) oder 2 (Lenken im Stand, Knick).
+   Mehrere Fahrkurven: Reiter oben im Schritt, **+** legt eine neue an. Unten im Plan stehen die
    Kennzahlen der Vorschau (Lenkwinkel, Radius, Weg, Anschlag). „Fahrlinie fertig“ führt zur Wiedergabe.
 5. **Wiedergabe & Export:** Abspielen und Regler, Anzeige (Hüllfläche, Silhouetten, Bewegungsspielraum), Ergebnis, Export
    (PNG, DXF, SVG) und „weitere Fahrkurve anlegen“.
@@ -270,7 +271,66 @@ ein und mit stetig abnehmendem Einschlag aus. Dieser Einschlag ergibt sich aus d
   ≈ 4,54 m bei den PKW-Daten, max. Lenkwinkel ≈ 43,4 gon, Lenkrad ≈ 565 gon bei Übersetzung 13).
 - Ist eine Strecke für den Mindestradius zu kurz oder wäre der Lenkwinkel über dem Limit, wird der Punkt nicht
   übernommen.
-- Orange auf dem Weg = Lenkung am Anschlag.
+- Orange auf dem Weg = Lenkung am Anschlag (nur in Fahrweise 1. In Fahrweise 2 ist der Anschlag der Normalfall).
+
+## Fahrweise 2
+Die Fahrzeugführer lenken bei annähernd stehendem Fahrzeug und fahren dann an. Dabei ergibt sich in der Leitlinie ein
+**Knick**. Diese Fahrweise mit der Lenkwinkeländerung bis zum Maximum im Stand wird durch die Annahme eines **abrupten
+Übergangs** zwischen Gerade und Kreisbogen simuliert. Daraus ergibt sich ein fahrzeugtechnisch möglicher
+Richtungsänderungswinkel von ca. 40 gon, bei Bussen (ausgenommen Gelenkbussen) 55 gon. (Beschreibung der RBSV, wie vom
+Auftraggeber genannt. Die RBSV 2020 selbst wurde nicht gelesen.)
+
+**Bedienung:** In Schritt 4 wählt der Schalter „Fahrweise dieser Fahrkurve“ die Fahrweise der gewählten Fahrkurve. Jede
+Fahrkurve hat ihre eigene Fahrweise (Reiter zeigen „FW 2“). „Mit Fahrweise 2 duplizieren“ legt eine Kopie mit der anderen
+Fahrweise an, so lassen sich beide Fahrweisen im selben Plan vergleichen. Die Abschnittsarten (Gerade/Ecke, Bogen durch
+Punkt, Kurve nach Winkel, Wende) gibt es in beiden Fahrweisen.
+
+### Modell
+- Der **Knick der Leitlinie** (Weg der Vorderachsmitte) ist der Lenkwinkel, den das Fahrzeug im Stand macht: Am Anfang des
+  Bogens springt die Fahrtrichtung der Vorderachse um den Anschlag `δmax = atan(Radstand / Radius der Hinterachse)`. Die
+  Anwendung berechnet ihn aus dem Wendekreis (PKW 43,4 gon, siehe Tabelle).
+- Ein kinematisches Fahrzeug mit festem Lenkwinkel dreht sich sofort um einen **festen Momentanpol**. Es gibt keinen
+  Übergang und kein Nachlaufen. Am Ende des Bogens geht der Lenkwinkel ebenso sofort auf null zurück (zweiter Knick), und
+  das Fahrzeug fährt in seiner Richtung geradeaus.
+- **Ecke zwischen zwei Geraden** (die Geraden sind Wege der Vorderachsmitte, Richtungsänderung Δ): Die **Hinterachse** fährt
+  einen Kreis mit dem Radius `R_hinten` (voller Einschlag), der beide Geraden berührt. Die Tangentenlänge ist
+  `tr = R_hinten · tan(Δ/2)`. Die Vorderachse fährt geradeaus, bis sie einen Radstand vor dem Berührpunkt der Hinterachse
+  liegt. Dann folgen der Knick, der Bogen um den Momentanpol (Radius `R_vorn = √(R_hinten² + Radstand²)`, Drehwinkel Δ), der
+  zweite Knick und die nächste Gerade. Bei großem Δ schwingt die Vorderachse über den Eckpunkt hinaus. Die Karosserie
+  dreht sich als starres Ganzes: Die äußerste Ecke läuft genau auf dem Wendekreis (Selbsttest).
+- **Mindestlängen:** Zwischen zwei Ecken `tr₁ + tr₂`, die erste Gerade (und eine Gerade nach einem Bogen) `tr − Radstand`,
+  die letzte Gerade `tr + Radstand`. Sonst meldet die Anwendung „Strecke zu kurz“ (Fahrweise 1 braucht die Tangentenlängen
+  des Bogens der Vorderachse und keinen Radstand).
+- **Bogen durch Punkt:** Mit dem Abstand `c` zum Punkt und dem Winkel `α` zur Fahrzeugrichtung fährt die Hinterachse den
+  Radius `ρ = (c + 2 · Radstand · cos α) / (2 · sin α)`. Der Knick ist `atan(Radstand / ρ)`. `ρ` darf nicht unter `R_hinten`
+  liegen (sonst „Bogen zu eng“).
+- **Kurve nach Winkel** (Radius R, Richtungsänderung des Fahrzeugs): Der Knick ist `asin(Radstand / R)`. Mit dem
+  Mindestradius ist das der Anschlag. Die Gerade danach läuft in der Fahrzeugrichtung weiter.
+- **Wende in einem Zug** (200 gon, Mindestradius): Das Fahrzeug dreht sich um 200 gon um den festen Punkt. Die Vorderachse
+  endet `2 · R_hinten` seitlich und `2 · Radstand` hinter dem Start (PKW: 7,04 m und 5,72 m; Fahrweise 1: 9,07 m Querversatz).
+  Der Platzbedarf bleibt etwa der Wendekreisdurchmesser.
+
+### Knickwinkel der Voreinstellungen
+| Fahrzeug | Knick = Lenkwinkel max. | RBSV |
+|---|---|---|
+| PKW | 43,4 gon | ca. 40 gon |
+| LKW | 46,9 gon | ca. 40 gon |
+| Müllfahrzeug 3-achsig | 38,9 gon | ca. 40 gon |
+| Müllfahrzeug 3-achsig Nachlaufachse | 39,1 gon | ca. 40 gon |
+| Gelenkbus 3-achsig (18 m) | 48,4 gon | Gelenkbusse sind von den 55 gon ausgenommen |
+| Sattelzug 16,50 m (Platzhalter) | 22,9 gon | ca. 40 gon (Platzhalter-Maße, siehe Sattelzug) |
+
+### Annahmen und offene Punkte
+- Der Knick wird **aus dem Wendekreis berechnet** und nicht fest auf 40 oder 55 gon gesetzt, denn er ist das Ergebnis des
+  vollen Einschlags. Die Werte der Tabelle stimmen mit den „ca. 40 gon“ ungefähr überein, nur der Sattelzug mit seinen
+  Platzhaltermaßen (Wendekreis 12,50 m) nicht. Für einen Solobus (55 gon) gibt es keine Voreinstellung: Fahrzeug kopieren
+  und Maße eintragen, der Knick steht in der Fahrzeuginfo und im Ergebnis.
+- Fahrweise 2 lenkt an **jeder** Ecke bis zum Anschlag, auch bei kleinen Richtungsänderungen. Unter etwa 40 gon ist
+  Fahrweise 1 realistischer. Die Anwendung schaltet nicht selbst um.
+- Gelenkfahrzeuge: Die vordere Karosserie dreht sich wie beschrieben. Die hintere folgt dem Gelenk wie bisher (Traktrix),
+  sie braucht nach dem Einschlag etwas Weg. Der Knickwinkel-Grenzwert wird wie in Fahrweise 1 geprüft.
+- Selbsttest: Drehung um den festen Punkt (Abweichung 0,0 mm), Knick = Lenkwinkel, Wende (Endlage in geschlossener Form),
+  Bogen durch Punkt, Mindestlängen, 500 zufällige Zielpunkte und Kurven.
 
 ## PKW (Voreinstellung)
 Länge 4,88 m · Radstand 2,86 m · Überhang vorn 0,92 m / hinten 1,10 m · Breite 1,89 m (ohne Spiegel) ·
@@ -278,7 +338,7 @@ Wendekreisradius außen 5,85 m (äußerste Karosserieecke bei Vollausschlag) →
 
 ## Modell
 Kinematisches Einspurmodell, die Hinterachse folgt zwangsgeführt. Nur Vorwärtsfahrt. Die Leitlinie ist die Vorderachsmitte. Der Button „Kinematik prüfen“ führt Selbsttests aus
-(Kreisfahrt, Wendekreis, innere Hüllkurve, Nachlaufachse, Sattelzug, Vektor-Export, Versionen der Voreinstellungen, Geradeausfahrt, Maßstab, Fahrweise 1: Tangentialität, Mindestradius, Radius wächst mit Abstand, Zielpunkt-Begrenzung, LKW); auch per `node -e "console.log(require('./js/sim.js').selfTest().filter(r => !r.ok))"` (leere Liste = alles bestanden).
+(Kreisfahrt, Wendekreis, innere Hüllkurve, Nachlaufachse, Sattelzug, Fahrweise 2, Vektor-Export, Versionen der Voreinstellungen, Geradeausfahrt, Maßstab, Fahrweise 1: Tangentialität, Mindestradius, Radius wächst mit Abstand, Zielpunkt-Begrenzung, LKW); auch per `node -e "console.log(require('./js/sim.js').selfTest().filter(r => !r.ok))"` (leere Liste = alles bestanden).
 
 ## Aufbau
 - `index.html` – Oberfläche

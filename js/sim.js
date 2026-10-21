@@ -175,8 +175,9 @@
    * Each result has these values:
    * s = distance along the path, F = front axle, R = model rear axle,
    * th = vehicle angle, d = steering angle (path tangent minus vehicle angle).
+   * th0 = the start direction of the vehicle. The default is the direction of the first step of the path.
    * An articulated vehicle (v.artic) has more values, see Sim.addRearBody. */
-  Sim.run = function (path, v) {
+  Sim.run = function (path, v, th0) {
     const n = path.length;
     if (n < 2) return null;
     const tan = [];
@@ -189,7 +190,7 @@
     for (let i = 0; i < n; i++) {
       const F = path[i];
       if (i === 0) {
-        th = tan[0];
+        th = th0 != null ? th0 : tan[0];        // The vehicle can start in a direction other than the first step (style 2: the kink is at the start).
       } else {
         s += hyp(F.x - path[i - 1].x, F.y - path[i - 1].y);
         // The rear axle follows the front axle. The distance |F - R| stays equal to the wheelbase.
@@ -240,15 +241,42 @@
   };
 
   /* Limits for the drive simulation. Return null if the vehicle data are not valid.
+   * fw = the driving style, 1 or 2 (see Sim.buildRoute). The default is 1.
    * rFront = smallest radius for the center of the front axle (at full lock).
+   * rRear = the radius of the model rear axle at full lock. wb = the wheelbase of the model.
+   * tanR = the radius of the circle that a corner needs. It is rFront for the style 1 (the front axle drives the arc)
+   * and rRear for the style 2 (the rear axle drives the arc, see below).
    * rMax = largest radius for an arc of the guide line. */
-  Sim.driveOpts = function (v) {
+  Sim.driveOpts = function (v, fw) {
     const lim = Sim.steerLimit(v);
     if (!lim) return null;
-    return { step: 0.05, dMax: lim.delta, rFront: lim.rFront, rMax: 200 };
+    const style = fw === 2 ? 2 : 1;
+    return { step: 0.05, dMax: lim.delta, rFront: lim.rFront, rRear: lim.rRear, wb: Sim.modelGeom(v).wb, fw: style,
+             tanR: style === 2 ? lim.rRear : lim.rFront, rMax: 200 };
   };
 
-  /* Driving style 1.
+  /* Driving style 2 (Fahrweise 2): the driver steers when the vehicle almost stands, and then drives off.
+   * The steering changes at once up to the maximum. The model uses an abrupt change between a straight line and a circular arc.
+   * The guide line (the path of the center of the front axle) has a kink at this change. The kink is the steering angle.
+   * It is the direction change that the vehicle can make at the kink: about 40 gon (RBSV: about 55 gon for a bus that is not articulated).
+   * The model computes the angle from the turning circle. It is Sim.steerLimit(v).delta.
+   * After the kink, the vehicle drives on the circle of the full lock. The front axle has the radius rFront.
+   * A kinematic vehicle that has a fixed steering angle turns around a fixed center of rotation at once. There is no transition.
+   * At the end of the arc, the steering goes back to zero at once. The vehicle then drives straight in its direction.
+   * So at a corner between two lines (the lines are the paths of the front axle):
+   *   The rear axle drives a circle with the radius rRear that touches both lines (the tangent length is rRear * tan(delta/2)).
+   *   The front axle drives straight until it is the wheelbase wb in front of the touch point of the rear axle.
+   *   Then the kink and the arc around the center of rotation with the radius rFront follow.
+   *   The sweep of the arc is the change of direction of the corner. At the end, there is a second kink and the next line.
+   * The line must be long enough for this: the sum of the two tangent lengths of the rear axle. The last line needs wb more.
+   * The first line (and a line after an arc) can be wb shorter, because the front axle is wb in front of the rear axle.
+   * With an arc through a point, the rear axle has the radius rho = (c + 2 * wb * cos(alpha)) / (2 * sin(alpha)).
+   * c = the distance to the point, alpha = the angle between the direction of the vehicle and the point.
+   * The front axle has the radius sqrt(rho^2 + wb^2). It is never smaller than rFront.
+   * With a turn (sweep and radius R), the steering angle is asin(wb / R). The sweep is the change of direction of the vehicle.
+   * A line after an arc or a turn goes in the direction of the vehicle at the end of the arc.
+   *
+   * Driving style 1.
    * The guide line has straight lines and circular arcs.
    * The center of the front axle moves along the guide line.
    * The arcs touch the straight lines (tangential). The guide line has no kink.
@@ -319,6 +347,7 @@
       for (let i = 1; i <= m; i++) path.push({ x: last.x + (T.x - last.x) * i / m, y: last.y + (T.y - last.y) * i / m });
     };
     let pose = { x: P[0].x, y: P[0].y, h: Math.atan2(P[1].y - P[0].y, P[1].x - P[0].x) };
+    const startDir = pose.h;                              // The vehicle starts in the direction of the first line.
     let forced = false, fail = null, lastArc = null;      // forced = true when an arc before sets the direction.
     const arcs = [];                                      // The arc at each corner point: arcs[index of the point] = { R, t, delta }.
     const ends = [];                                      // The end of each part: ends[index in the input] = { x, y }.
@@ -333,13 +362,15 @@
       if (!(aa > 1e-6)) { ends[e.src] = { x: pose.x, y: pose.y }; return; }
       const R = e.R > 0 ? e.R : o.rFront, sign = sweep > 0 ? 1 : -1;
       if (R < o.rFront - 1e-6) setFail({ kind: 'radius', R: R, rMin: o.rFront });
-      const C = { x: pose.x - sign * R * Math.sin(pose.h), y: pose.y + sign * R * Math.cos(pose.h) };
+      // Style 2: the guide line has a kink. The arc starts in the direction of the front wheels, which is the steering angle asin(wb / R) away.
+      const kink = o.fw === 2 ? sign * Math.asin(Math.min(1, o.wb / R)) : 0, h0 = pose.h + kink;
+      const C = { x: pose.x - sign * R * Math.sin(h0), y: pose.y + sign * R * Math.cos(h0) };
       const phi0 = Math.atan2(pose.y - C.y, pose.x - C.x), m = Math.max(1, Math.ceil(R * aa / o.step));
       for (let i = 1; i <= m; i++) path.push({ x: C.x + R * Math.cos(phi0 + sweep * i / m), y: C.y + R * Math.sin(phi0 + sweep * i / m) });
       const last = path[path.length - 1];
-      pose = { x: last.x, y: last.y, h: pose.h + sweep };
+      pose = { x: last.x, y: last.y, h: pose.h + sweep };      // The direction of the vehicle (style 2) or of the guide line (style 1).
       ends[e.src] = { x: last.x, y: last.y };
-      lastArc = { R: R, delta: sweep };
+      lastArc = { R: R, delta: sweep, kink: kink };
     };
 
     // Make an arc from the pose through the point P[j].
@@ -354,15 +385,30 @@
         setFail({ kind: 'radius', R: Infinity, rMin: o.rFront });
         line(M); pose = { x: M.x, y: M.y, h: Math.atan2(dy, dx) }; return;
       }
-      const R = c / (2 * Math.sin(aa)), sign = alpha > 0 ? 1 : -1, sweep = 2 * alpha;
-      if (R < o.rFront - 1e-6) setFail({ kind: 'radius', R: R, rMin: o.rFront });
-      const C = { x: pose.x - sign * R * Math.sin(pose.h), y: pose.y + sign * R * Math.cos(pose.h) };
+      const sign = alpha > 0 ? 1 : -1;
+      let R, sweep, kink = 0;
+      if (o.fw === 2) {
+        // Style 2: the rear axle drives the radius rho. The front axle drives the radius R. The kink is the steering angle.
+        const rho = (c + 2 * o.wb * Math.cos(aa)) / (2 * Math.sin(aa));
+        R = hyp(Math.max(rho, 0), o.wb);
+        if (!(rho >= o.rRear - 1e-6)) {
+          setFail({ kind: 'radius', R: R, rMin: o.rFront });
+          line(M); pose = { x: M.x, y: M.y, h: Math.atan2(dy, dx) }; return;
+        }
+        kink = sign * Math.atan2(o.wb, rho);
+        sweep = 2 * (alpha - kink);
+      } else {
+        R = c / (2 * Math.sin(aa)); sweep = 2 * alpha;
+        if (R < o.rFront - 1e-6) setFail({ kind: 'radius', R: R, rMin: o.rFront });
+      }
+      const h0 = pose.h + kink;
+      const C = { x: pose.x - sign * R * Math.sin(h0), y: pose.y + sign * R * Math.cos(h0) };
       const phi0 = Math.atan2(pose.y - C.y, pose.x - C.x), m = Math.max(1, Math.ceil(R * Math.abs(sweep) / o.step));
       for (let i = 1; i < m; i++) path.push({ x: C.x + R * Math.cos(phi0 + sweep * i / m), y: C.y + R * Math.sin(phi0 + sweep * i / m) });
       path.push({ x: M.x, y: M.y });
       pose = { x: M.x, y: M.y, h: pose.h + sweep };
       ends[M.src] = { x: M.x, y: M.y };
-      lastArc = { R: R, delta: sweep };
+      lastArc = { R: R, delta: sweep, kink: kink };
     };
 
     // The lines P[j] to P[k]. They are straight lines with an arc at each corner between two lines.
@@ -385,14 +431,36 @@
       const cor = [];
       for (let i = 1; i < n; i++) {
         const dl = normAngle(th[i] - th[i - 1]), half = Math.abs(dl) / 2, active = Math.abs(dl) >= 1e-3;
-        cor[i] = { active: active, dl: dl, half: half, tMin: active ? o.rFront * Math.tan(half) : 0 };
+        cor[i] = { active: active, dl: dl, half: half, tMin: active ? o.tanR * Math.tan(half) : 0 };
         if (active && Math.PI - Math.abs(dl) < 0.02) cor[i].tMin = Infinity;   // The corner is almost a reversal.
       }
       const tMinAt = (i) => (i >= 1 && i < n ? cor[i].tMin : 0);
       const activeAt = (i) => i >= 1 && i < n && cor[i].active;
       for (let i = 0; i < n; i++) {
-        const need = tMinAt(i) + tMinAt(i + 1);
+        // Style 2: the front axle goes wb past the touch point of the rear axle at the end of a corner and starts wb before it at the next one.
+        const need = o.fw === 2 ? (activeAt(i) ? tMinAt(i) + o.wb : 0) + (activeAt(i + 1) ? tMinAt(i + 1) - o.wb : 0) : tMinAt(i) + tMinAt(i + 1);
         if (len[i] + 1e-6 < need) setFail({ kind: 'length', leg: idx[i + 1] - 1, need: need, have: len[i] });
+      }
+      if (o.fw === 2) {
+        // The corners of the style 2. The rear axle drives the circle that touches both lines. The front axle drives the kink and the arc around its center.
+        for (let i = 1; i < n; i++) {
+          const c = cor[i];
+          if (!c.active || !isFinite(c.tMin)) continue;
+          const ux = Math.cos(th[i - 1]), uy = Math.sin(th[i - 1]), sign = c.dl > 0 ? 1 : -1;
+          const T = { x: Q[i].x - c.tMin * ux, y: Q[i].y - c.tMin * uy };                  // The touch point of the rear axle.
+          const C = { x: T.x - sign * o.rRear * uy, y: T.y + sign * o.rRear * ux };        // The center of rotation. It does not move.
+          const A = { x: T.x + o.wb * ux, y: T.y + o.wb * uy };                            // The front axle when the steering turns in the stand.
+          arcs[idx[i]] = { R: o.rFront, t: c.tMin, delta: c.dl, kink: sign * Math.atan2(o.wb, o.rRear) };
+          line(A);
+          const phi0 = Math.atan2(A.y - C.y, A.x - C.x), m = Math.max(1, Math.ceil(o.rFront * Math.abs(c.dl) / o.step));
+          for (let q = 1; q <= m; q++) {
+            const phi = phi0 + c.dl * q / m;
+            path.push({ x: C.x + o.rFront * Math.cos(phi), y: C.y + o.rFront * Math.sin(phi) });
+          }
+        }
+        line(Q[n]);
+        pose = { x: Q[n].x, y: Q[n].y, h: th[n - 1] };
+        return;
       }
       // The free length of the lines goes to the arcs. This makes the radii as large as possible.
       for (let i = 1; i < n; i++) {
@@ -426,7 +494,7 @@
       j = k + 1;
     }
     if (opt && opt.checkOnly) return { fail: fail, lastArc: lastArc, arcs: arcs, ends: ends, end: pose };
-    const smp = Sim.run(path, v);
+    const smp = Sim.run(path, v, startDir);
     let maxD = 0;
     for (const q of smp) maxD = Math.max(maxD, Math.abs(q.d));
     if (!fail && maxD > o.dMax + 0.01) fail = { kind: 'steer', maxD: maxD };
@@ -488,7 +556,8 @@
       if (Math.abs(alpha) > aMax) { alpha = (alpha < 0 ? -1 : 1) * aMax; clamped = true; }
       let c = dist;
       for (let k = 0; k < 40; k++) {
-        const cMin = 2 * o.rFront * Math.abs(Math.sin(alpha)) * 1.0001 + 1e-4;     // The chord of the smallest arc.
+        // The chord of the smallest arc. Style 2: the point must be so far away that the rear axle has the radius rRear or more.
+        const cMin = (o.fw === 2 ? Math.max(0, 2 * o.rRear * Math.abs(Math.sin(alpha)) - 2 * o.wb * Math.cos(alpha)) : 2 * o.rFront * Math.abs(Math.sin(alpha))) * 1.0001 + 1e-4;
         if (c < cMin) { c = cMin; clamped = true; }
         pt = { x: V.x + c * Math.cos(V.h + alpha), y: V.y + c * Math.sin(V.h + alpha) };
         run = make(pt);
@@ -509,13 +578,14 @@
     if (P.length >= 3 && P[P.length - 2].t !== 'arc' && P[P.length - 2].t !== 'turn') {      // There is a corner at U. It needs a part of the line.
       const W = at(P.length - 3), dlU = normAngle(thIn - Math.atan2(U.y - W.y, U.x - W.x));
       if (Math.PI - Math.abs(dlU) < 0.02) free = -Infinity;
-      else if (Math.abs(dlU) >= 1e-3) free -= o.rFront * Math.tan(Math.abs(dlU) / 2);
-    }
+      else if (Math.abs(dlU) >= 1e-3) free -= o.tanR * Math.tan(Math.abs(dlU) / 2);
+    } else if (o.fw === 2) free += o.wb;                // Style 2: at the start and after an arc, the front axle is wb in front of the rear axle.
     let dl = dist < 1e-6 ? 0 : normAngle(Math.atan2(dy, dx) - thIn);
-    const dlMax = free > 0 ? Math.min(2 * Math.atan(free / o.rFront), Math.PI - 0.03) : 0;
+    const dlMax = free > 0 ? Math.min(2 * Math.atan(free / o.tanR), Math.PI - 0.03) : 0;
     if (Math.abs(dl) > dlMax) { dl = (dl < 0 ? -1 : 1) * dlMax; clamped = true; }
     for (let k = 0; k < 60; k++) {
-      const need = Math.abs(dl) >= 1e-3 ? o.rFront * Math.tan(Math.abs(dl) / 2) * 1.0001 + 1e-4 : 0;
+      // The new line needs the tangent length. Style 2: it needs wb more, because the front axle goes wb past the touch point.
+      const need = Math.abs(dl) >= 1e-3 ? (o.tanR * Math.tan(Math.abs(dl) / 2) + (o.fw === 2 ? o.wb : 0)) * 1.0001 + 1e-4 : 0;
       let d2 = dist;
       if (d2 < need) { d2 = need; clamped = true; }
       pt = { x: V.x + d2 * Math.cos(thIn + dl), y: V.y + d2 * Math.sin(thIn + dl) };
@@ -979,6 +1049,84 @@
     }
     add('Zielpunkt-Begrenzung (Gerade und Bogen gemischt): alle Routen fahrbar, ohne Sprünge', badMix === 0 && jumpMix === 0,
       totalMix + ' Punkte, davon ' + clampMix + ' begrenzt, ' + bigTurn + ' Wenden über 200 gon, ' + badMix + ' nicht fahrbar, ' + jumpMix + ' Sprünge');
+
+    // Driving style 2 (Fahrweise 2): the steering changes at once up to the maximum. The vehicle turns around a fixed center of rotation.
+    // The rear axle drives a circle with the radius rRear that touches both lines. The guide line has a kink that is the steering angle.
+    for (const veh2 of Sim.PRESETS) {
+      const o2 = Sim.driveOpts(veh2, 2), lim2 = Sim.steerLimit(veh2), c100 = Sim.buildRoute([pt(0, 0), pt(60, 0), pt(60, 60)], veh2, o2);
+      const C2 = { x: 60 - lim2.rRear, y: lim2.rRear }, last2 = c100.smp[c100.smp.length - 1];
+      let devR = 0, devF = 0, outer2 = 0, dArc = 0, nArc = 0, maxKink = 0;
+      c100.smp.forEach((q, i, a) => {
+        if (q.th > 0.08 && q.th < Math.PI / 2 - 0.08) {
+          nArc++; devR = Math.max(devR, Math.abs(hyp(q.Rx - C2.x, q.Ry - C2.y) - lim2.rRear)); devF = Math.max(devF, Math.abs(hyp(q.Fx - C2.x, q.Fy - C2.y) - lim2.rFront));
+          dArc = Math.max(dArc, Math.abs(q.d));
+          for (const k of Sim.bodyPoly(q, veh2)) outer2 = Math.max(outer2, hyp(k.x - C2.x, k.y - C2.y));
+        }
+        if (i > 1) maxKink = Math.max(maxKink, Math.abs(normAngle(Math.atan2(q.Fy - a[i - 1].Fy, q.Fx - a[i - 1].Fx) - Math.atan2(a[i - 1].Fy - a[i - 2].Fy, a[i - 1].Fx - a[i - 2].Fx))));
+      });
+      add(veh2.name + ': Fahrweise 2, Ecke 100 gon: fahrbar, Fahrzeug steht am Ende in Richtung der zweiten Geraden',
+        !c100.fail && Math.abs(last2.th - Math.PI / 2) < 0.005 && Math.abs(last2.Rx - 60) < 0.01, 'Richtung ' + Sim.gon(last2.th).toFixed(2) + ' gon, Hinterachse bei x = ' + last2.Rx.toFixed(3) + ' m');
+      add(veh2.name + ': Fahrweise 2: Drehung um einen festen Punkt (Hinterachse R ' + lim2.rRear.toFixed(2) + ' m, Vorderachse R ' + lim2.rFront.toFixed(2) + ' m, außen ' + veh2.rOuter + ' m)',
+        nArc > 50 && devR < 0.01 && devF < 0.01 && Math.abs(outer2 - veh2.rOuter) < 0.02 && Math.abs(dArc - lim2.delta) < 0.005,
+        'Abweichung Hinterachse ' + (devR * 1000).toFixed(1) + ' mm, Vorderachse ' + (devF * 1000).toFixed(1) + ' mm, außen ' + outer2.toFixed(3) + ' m, Lenkwinkel ' + Sim.gon(dArc).toFixed(1) + ' gon');
+      add(veh2.name + ': Fahrweise 2: Knick der Leitlinie = Lenkwinkel max. ' + Sim.gon(lim2.delta).toFixed(1) + ' gon', Math.abs(maxKink - lim2.delta) < 0.01, 'gemessen ' + Sim.gon(maxKink).toFixed(1) + ' gon');
+      // Turn around in one movement with the minimum radius: the rotation of 200 gon around the center. The front axle ends 2 * rRear to the side and 2 * wb behind.
+      const t2 = Sim.makeTurn([pt(0, 0), pt(20, 0)], 1, Math.PI, 0, veh2, o2), e2 = t2.run.end;
+      const C3 = { x: 20 - o2.wb, y: lim2.rRear };      // The center of rotation: rFront * sin(delta) = wb and rFront * cos(delta) = rRear.
+      let outerT2 = 0;
+      for (const q of t2.run.smp) if (q.th > 1.3 && q.th < 2.0) for (const k of Sim.bodyPoly(q, veh2)) outerT2 = Math.max(outerT2, hyp(k.x - C3.x, k.y - C3.y));
+      add(veh2.name + ': Fahrweise 2, Wende 200 gon: Ende = 2 · rRear = ' + (2 * lim2.rRear).toFixed(2) + ' m seitlich und 2 · wb = ' + (2 * o2.wb).toFixed(2) + ' m zurück, Außenradius = Wendekreis',
+        !t2.run.fail && hyp(e2.x - (20 - 2 * o2.wb), e2.y - 2 * lim2.rRear) < 0.01 && Math.abs(e2.h - Math.PI) < 1e-6 && Math.abs(outerT2 - veh2.rOuter) < 0.03,
+        'Ende (' + e2.x.toFixed(2) + '; ' + e2.y.toFixed(2) + '), Außenradius ' + outerT2.toFixed(2) + ' m, Fahrweise 1 hätte ' + (2 * lim2.rFront).toFixed(2) + ' m Versatz');
+    }
+    // An arc through a point and the line after it (style 2). The arc ends in the point. The line continues in the direction of the vehicle.
+    for (const veh2 of Sim.PRESETS) {
+      const o2 = Sim.driveOpts(veh2, 2), mk = (route) => Sim.buildRoute(route, veh2, o2);
+      const arcP = { x: 20 + 0.9 * o2.rFront, y: 0.9 * o2.rFront, t: 'arc' }, ar = mk([pt(0, 0), pt(20, 0), arcP]), la = ar.smp[ar.smp.length - 1];
+      const dirV = ar.end.h, after = mk([pt(0, 0), pt(20, 0), arcP, pt(arcP.x + 30 * Math.cos(dirV), arcP.y + 30 * Math.sin(dirV))]);
+      add(veh2.name + ': Fahrweise 2, Bogen durch Punkt: Ziel auf 1 mm genau, Knick = Lenkwinkel, Gerade danach in Fahrzeugrichtung',
+        !ar.fail && hyp(la.Fx - arcP.x, la.Fy - arcP.y) < 0.001 && ar.lastArc && Math.abs(ar.lastArc.kink) <= o2.dMax + 1e-9 && Math.abs(la.th - ar.end.h) < 0.01 &&
+        !after.fail && Math.abs(after.smp[after.smp.length - 1].th - dirV) < 0.01,
+        'R = ' + (ar.lastArc ? ar.lastArc.R.toFixed(2) : '–') + ' m, Knick ' + (ar.lastArc ? Sim.gon(Math.abs(ar.lastArc.kink)).toFixed(1) : '–') + ' gon');
+    }
+    // The lines must be long enough: the first line tr - wb, the last line tr + wb (tr = tangent length of the rear axle).
+    const ow = Sim.driveOpts(v, 2), trW = ow.rRear * Math.tan(Math.PI / 4);
+    const shortFirst = Sim.buildRoute([pt(0, 0), pt(trW - ow.wb - 0.3, 0), pt(trW - ow.wb - 0.3, 30)], v, ow);
+    const okFirst = Sim.buildRoute([pt(0, 0), pt(trW - ow.wb + 0.3, 0), pt(trW - ow.wb + 0.3, 30)], v, ow);
+    const shortLast = Sim.buildRoute([pt(0, 0), pt(30, 0), pt(30, trW + ow.wb - 0.3)], v, ow);
+    const okLast = Sim.buildRoute([pt(0, 0), pt(30, 0), pt(30, trW + ow.wb + 0.3)], v, ow);
+    add('Fahrweise 2: Länge der Geraden (erste Gerade ab tr − wb, letzte ab tr + wb) wird geprüft',
+      shortFirst.fail && shortFirst.fail.kind === 'length' && !okFirst.fail && shortLast.fail && shortLast.fail.kind === 'length' && !okLast.fail,
+      'PKW: tr = ' + trW.toFixed(2) + ' m, wb = ' + ow.wb.toFixed(2) + ' m');
+    // Limited points and turns of the style 2 in random order. The vehicle can drive each route and the route has no jumps.
+    let badF2 = 0, jumpF2 = 0, totalF2 = 0, clampF2 = 0;
+    for (const veh2 of Sim.PRESETS) {
+      const o2 = Sim.driveOpts(veh2, 2);
+      for (let r = 0; r < 12; r++) {
+        let route = [pt(0, 0), pt(15 + rnd() * 30, 0)];
+        for (let s2 = 0; s2 < 6; s2++) {
+          const mode = rnd() < 0.5 ? 'arc' : 'line', e = Sim.buildRoute(route, veh2, o2, { checkOnly: true }).end;
+          const lt = Sim.limitTarget(route, pt(e.x + rnd() * 120 - 60, e.y + rnd() * 120 - 60), mode, veh2, o2);
+          totalF2++; if (lt.clamped) clampF2++;
+          if (lt.run.fail) badF2++;
+          let m = 0, hmax = 0;
+          for (let i = 1; i < lt.run.smp.length; i++) {
+            m = Math.max(m, hyp(lt.run.smp[i].Rx - lt.run.smp[i - 1].Rx, lt.run.smp[i].Ry - lt.run.smp[i - 1].Ry));
+            hmax = Math.max(hmax, Math.abs(normAngle(lt.run.smp[i].th - lt.run.smp[i - 1].th)));
+          }
+          if (m > 0.0502 || hmax > 0.06) jumpF2++;
+          route = route.concat([{ x: lt.pt.x, y: lt.pt.y, t: mode }]);
+        }
+        const sweep = (40 + rnd() * 350) * Math.PI / 200, tt = Sim.makeTurn(route, rnd() < 0.5 ? 1 : -1, sweep, rnd() < 0.5 ? 0 : o2.rFront * (0.5 + rnd() * 3), veh2, o2);
+        const e1 = tt.run.end, after = Sim.buildRoute(route.concat([tt.el, pt(e1.x + 15 * Math.cos(e1.h) + 3, e1.y + 15 * Math.sin(e1.h))]), veh2, o2);
+        totalF2++; if (tt.run.fail || after.fail) badF2++;
+      }
+    }
+    add('Fahrweise 2: Zielpunkte (Gerade, Bogen) und Kurven nach Winkel: alle Routen fahrbar, ohne Sprünge', badF2 === 0 && jumpF2 === 0,
+      totalF2 + ' Teile, davon ' + clampF2 + ' Punkte begrenzt, ' + badF2 + ' nicht fahrbar, ' + jumpF2 + ' Sprünge');
+    // The RBSV names about 40 gon as the direction change at the kink for a car. The model computes it from the turning circle.
+    const kinkPkw = Sim.gon(Sim.steerLimit(Sim.PRESETS[0]).delta);
+    add('Fahrweise 2: Knick des PKW liegt bei ca. 40 gon (RBSV)', Math.abs(kinkPkw - 40) < 5, 'berechnet ' + kinkPkw.toFixed(1) + ' gon aus dem Wendekreis ' + Sim.PRESETS[0].rOuter + ' m');
 
     // Preset versioning. Saved vehicles from before the versioning (version 1, no base) are merged with the new presets.
     const legacy = Sim.PRESET_HISTORY[1].map((p) => Object.assign({}, p));

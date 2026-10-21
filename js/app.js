@@ -156,7 +156,7 @@
     }
     const run = Sim.buildRoute(pts.slice(0, valid + 1), v, o);
     const res = analyse(run.smp, lim, v);
-    res.lim = lim; res.fail = run.fail;
+    res.lim = lim; res.fail = run.fail; res.arcs = run.arcs; res.lastArc = run.lastArc;
     // A turn has no point of its own. Its marker is at the end of the turn.
     wps.forEach((w, i) => {
       const e = run.ends[i + 1];
@@ -241,19 +241,10 @@
     const A = { smp: smp, sweep: new Path2D(), band: new Path2D(), sat: new Path2D(), front: new Path2D(),
                 rear: new Path2D(), trails: new Path2D(), sil: new Path2D(),
                 maxD: 0, maxPhi: 0, satLen: 0, turn: 0, length: smp[smp.length - 1].s };
-    // The envelope lines (meters). Each traced point has its own line. A line of a side point at a rigid axle is only
-    // an envelope line on the inner side of the turn. On the outer side, the body covers it. A line breaks where this changes.
-    const info = Sim.trailInfo(v), env = [], pen = [];
     const silStep = Math.max(0.5, parseFloat($('silStep').value) || 2);
     let nextSil = 0;
     smp.forEach((p, i) => {
       const polys = Sim.bodyPolys(p, v);                    // An articulated vehicle has three polygons.
-      Sim.trailPoints(p, v).forEach((c, k) => {
-        const t = info[k].kind === 'side' ? Sim.turnSide(smp, i, info[k].body) : 0;
-        if (t !== 0 && t !== info[k].side) { pen[k] = null; return; }
-        if (!pen[k]) { pen[k] = []; env.push(pen[k]); }
-        pen[k].push(c);
-      });
       if (i % 2 === 0 || i === smp.length - 1) polys.forEach((poly) => addPoly(A.sweep, poly));
       if (i % 4 === 0 || i === smp.length - 1) polys.forEach((poly) => addPoly(A.band, poly));      // The band is a stroke: it needs fewer polygons.
 
@@ -266,8 +257,8 @@
         A.sat.moveTo(smp[i - 1].Fx, smp[i - 1].Fy); A.sat.lineTo(p.Fx, p.Fy);
       }
     });
-    env.forEach((t) => polyline(A.trails, t));
-    A.env = env;
+    A.env = Sim.envelopeLines(smp, v);                     // The envelope lines (meters).
+    A.env.forEach((t) => polyline(A.trails, t));
     polyline(A.front, smp.map((p) => ({ x: p.Fx, y: p.Fy })));
     polyline(A.rear, smp.map((p) => ({ x: p.Rx, y: p.Ry })));
     return A;
@@ -1023,14 +1014,84 @@
     if (S.playing) { if (S.pos >= 1) S.pos = 0; lastT = performance.now(); requestAnimationFrame(tick); }
   });
 
+  // Download a blob as a file. The link has a blob URL, and the URL goes away after the click.
+  function download(blob, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
   $('png').addEventListener('click', () => {
     draw();
-    cv.toBlob((b) => {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(b); a.download = 'schleppkurve.png'; a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    });
+    cv.toBlob((b) => download(b, 'schleppkurve.png'));
   });
+
+  /* ---------- vector export (DXF, SVG) ---------- */
+  // The smallest radius of the guide line (the path of the center of the front axle) in meters, or Infinity for a straight line.
+  function minGuideRadius(smp) {
+    let minR = Infinity;
+    for (let i = 2; i < smp.length; i++) {
+      const a = Math.atan2(smp[i - 1].Fy - smp[i - 2].Fy, smp[i - 1].Fx - smp[i - 2].Fx), b = Math.atan2(smp[i].Fy - smp[i - 1].Fy, smp[i].Fx - smp[i - 1].Fx);
+      const dth = Math.abs(Math.atan2(Math.sin(b - a), Math.cos(b - a))), ds = Math.hypot(smp[i].Fx - smp[i - 1].Fx, smp[i].Fy - smp[i - 1].Fy);
+      if (dth > 1e-6) minR = Math.min(minR, ds / dth);
+    }
+    return minR;
+  }
+
+  /* The text lines of the export: the vehicle, the angles and the radii. */
+  function exportTexts(unitPt, clear) {
+    const R = S.res, v = veh, lim = R.lim, arcs = [];
+    R.arcs.forEach((a, i) => { if (a) arcs.push('Ecke ' + i + ': R = ' + f(a.R, 1) + ' m, ' + f(Math.abs(gon(a.delta)), 1) + ' gon'); });
+    if (R.lastArc) arcs.push('letzter Bogen: R = ' + f(R.lastArc.R, 1) + ' m, ' + f(Math.abs(gon(R.lastArc.delta)), 1) + ' gon');
+    const minR = minGuideRadius(R.smp), t = [];
+    t.push('Schleppkurve ' + S.routes[S.ri].name + ' · Fahrzeug ' + v.name);
+    t.push('Fahrweise 1 · Leitlinie = Mitte der Vorderachse (nicht die Karosserie)');
+    t.push('Wendekreisradius außen ' + f(v.rOuter, 2) + ' m (Durchmesser ' + f(2 * v.rOuter, 2) + ' m) · Radius Vorderachse min. ' + f(lim.rFront, 2) + ' m · max. Lenkwinkel ' + f(gon(lim.delta), 1) + ' gon');
+    t.push('Richtungsänderung ' + f(Math.abs(gon(R.turn)), 1) + ' gon ' + (Math.abs(R.turn) < 1e-3 ? '' : R.turn > 0 ? '(rechts)' : '(links)') + ' · Weglänge ' + f(R.length, 1) + ' m · max. Lenkwinkel ' + f(gon(R.maxD), 1) + ' gon' +
+      (isFinite(minR) ? ' · kleinster Radius der Leitlinie ' + f(minR, 1) + ' m' : ''));
+    if (v.artic) t.push('Knickwinkel max. ' + f(gon(R.maxPhi), 1) + ' gon (Grenzwert ' + f(v.knickGon, 1) + ' gon)');
+    if (arcs.length) t.push('Bögen: ' + arcs.join(' · '));
+    if (clear > 0) t.push('Bewegungsspielraum ' + f(clear, 2) + ' m (Kontur ist eine Näherung)');
+    t.push(unitPt ? 'Einheit: pt (Planeinheiten), Maßstab 1 m = ' + f(1 / S.mpp, 2) + ' pt, ca. 1:' + Math.round(1000 * S.mpp / 0.352778) + ' bei Originalgröße'
+                  : 'Einheit: m (Naturmaß)');
+    return t;
+  }
+
+  /* The model for Export.dxf and Export.svg (see js/export.js): the lines in meters of the selected driving line. */
+  function exportModel() {
+    const R = S.res, v = veh, clear = clearance(), unitPt = $('expUnit').value === 'pt', simp = (pts) => Export.simplify(pts, 0.002);
+    const lines = [];
+    lines.push({ layer: 'LEITLINIE', pts: simp(R.smp.map((q) => ({ x: q.Fx, y: q.Fy }))) });      // The guide line is the path of the front axle.
+    lines.push({ layer: 'HINTERACHSE', pts: simp(R.smp.map((q) => ({ x: q.Rx, y: q.Ry }))) });
+    R.env.forEach((l) => lines.push({ layer: 'HUELLKURVE', pts: simp(l) }));
+    const ends = [R.smp[0], R.smp[R.smp.length - 1]];
+    ends.forEach((q) => Sim.bodyPolys(q, v).forEach((poly, i) => { if (!(v.artic && v.kind !== 'semi' && i === 1)) lines.push({ layer: 'FAHRZEUG', pts: poly, closed: true }); }));
+    if (clear > 0) {
+      const polys = [].concat(...R.smp.filter((q, i) => i % 2 === 0 || i === R.smp.length - 1).map((q) => Sim.bodyPolys(q, v)));
+      const caps = [].concat(...ends.map((q) => Sim.bodyPolys(q, v)));
+      Export.bandLines(polys, R.env, caps, clear).forEach((l) => lines.push({ layer: 'SPIELRAUM', pts: simp(l) }));
+    }
+    return { title: S.routes[S.ri].name + ' · ' + v.name, lines: lines, texts: exportTexts(unitPt, clear), k: unitPt ? 1 / S.mpp : 1, pageH: S.ph * S.mpp };
+  }
+
+  // A file name from the names of the driving line and the vehicle: ASCII, lower case.
+  function fileName(ext) {
+    const slug = (S.routes[S.ri].name + ' ' + veh.name).toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+      .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    return 'schleppkurve_' + slug + '.' + ext;
+  }
+
+  function exportVector(ext) {
+    if (!S.res || !S.mpp || !S.start || !S.res.smp.length) {
+      $('hint').textContent = 'Für den Export zuerst Maßstab und eine Fahrlinie setzen.'; $('hint').dataset.err = '1';
+      return;
+    }
+    const model = exportModel();
+    const text = ext === 'dxf' ? Export.dxf(model) : Export.svg(model);
+    download(new Blob([text], { type: ext === 'dxf' ? 'application/dxf' : 'image/svg+xml' }), fileName(ext));
+  }
+  $('dxf').addEventListener('click', () => exportVector('dxf'));
+  $('svg').addEventListener('click', () => exportVector('svg'));
 
   $('selftest').addEventListener('click', () => {
     $('tests').innerHTML = Sim.selfTest().map((r) =>

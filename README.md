@@ -122,6 +122,35 @@ Technik: Die überstrichene Fläche wird gefüllt und mit der Linienbreite `2 ·
 scheinen die Innenkanten der Striche und die Überlappungen der Polygone nicht durch. Für das Band reicht jede 4. Silhouette
 (Lücken unter 7 cm, vom Band überdeckt), denn das Streichen ist der langsame Teil.
 
+## Vektor-Export (DXF, SVG)
+Der PNG-Export ist ein Bildschirmbild und nicht maßstäblich. Die Buttons **DXF exportieren** und **SVG exportieren** in
+Abschnitt 5 schreiben das Ergebnis der gewählten Fahrkurve als Vektoren. Das Feld daneben wählt die **Einheit**:
+- **Meter** (Naturmaß). Im Text steht „Einheit: m“.
+- **Plan (pt):** die Einheit des PDF-Plans (1 pt = 1/72 Zoll). Der Maßstab steht im Text („1 m = 20,00 pt, ca. 1:142 bei
+  Originalgröße“). So lässt sich das Ergebnis über den Plan legen.
+
+Ebenen (DXF-Layer und SVG-Gruppen), alle als Polylinien:
+
+| Ebene | Inhalt |
+|---|---|
+| `LEITLINIE` | Weg der **Vorderachsmitte**. Das ist die Leitlinie. Im Modell ist sie identisch mit dem Weg der Vorderachse. |
+| `HINTERACHSE` | Weg der Hinterachse (bei Gelenkfahrzeugen der Zugmaschine bzw. der Mittelachse) |
+| `HUELLKURVE` | äußere Hüllkurven (Ecken) und innere Hüllkurven (Seitenpunkte an der starren Achse). Der Umriss der überstrichenen Fläche (Vereinigung) wird durch diese Linien angenähert. |
+| `FAHRZEUG` | Umrisse des Fahrzeugs am Start und am Ende (ohne Faltenbalg) |
+| `SPIELRAUM` | Kontur des Bewegungsspielraums, nur wenn der Haken gesetzt ist (**Näherung**, siehe unten) |
+| `TEXT` | Fahrzeugname, Wendekreis, Lenkwinkel, Richtungsänderung, Radien der Bögen, Einheit und Maßstab |
+
+- **DXF:** Release 12, ASCII, von Hand geschrieben (keine Bibliothek). `POLYLINE` und `TEXT`. Umlaute stehen als `\U+00FC`
+  im Text. Der Ursprung liegt an der **linken unteren Ecke der Planseite**, die y-Achse zeigt nach oben (CAD-Konvention), das
+  Bild ist also nicht gespiegelt. Eine Prüfung mit der Bibliothek ezdxf (nicht Teil des Projekts) liest die Dateien ohne Fehler.
+- **SVG:** Plankoordinaten, die y-Achse zeigt nach unten wie im Plan. Die `viewBox` zeigt das Ergebnis, der Text steht darunter.
+- Die Linien sind auf 2 mm Abweichung vereinfacht (Douglas-Peucker), damit die Dateien klein bleiben.
+- **Kontur des Bewegungsspielraums:** Sie besteht aus den Versatzkurven der Hüllkurven im Abstand des Spielraums. Ein Punkt
+  gehört zur Kontur, wenn er nicht in der überstrichenen Fläche und nicht näher als der Spielraum an einer Hüllkurve liegt.
+  Die Enden werden mit Bögen um die Ecken des Fahrzeugs am Start und am Ende geschlossen. An Übergängen zwischen zwei
+  Hüllkurven sind kleine Lücken möglich. Im Selbsttest liegen alle Punkte auf 1 cm genau im Abstand des Spielraums.
+- Der Download läuft über eine Blob-URL wie beim PNG.
+
 ## Sattelzug (Sattelkupplung)
 Der Sattelzug ist das maßgebende Fahrzeug an Knotenpunkten. Mathematisch ist er der Gelenkbus mit **negativem Hitch**: Der
 Sattelzapfen liegt **vor** der Mitte der Hinterachsen der Zugmaschine. Es gelten dieselben Formeln, `Sim.articSteady`
@@ -189,10 +218,11 @@ Wendekreisradius außen 5,85 m (äußerste Karosserieecke bei Vollausschlag) →
 
 ## Modell
 Kinematisches Einspurmodell, die Hinterachse folgt zwangsgeführt. Nur Vorwärtsfahrt. Der Button „Kinematik prüfen“ führt Selbsttests aus
-(Kreisfahrt, Wendekreis, innere Hüllkurve, Nachlaufachse, Sattelzug, Geradeausfahrt, Maßstab, Fahrweise 1: Tangentialität, Mindestradius, Radius wächst mit Abstand, Zielpunkt-Begrenzung, LKW); auch per `node -e "console.log(require('./js/sim.js').selfTest().filter(r => !r.ok))"` (leere Liste = alles bestanden).
+(Kreisfahrt, Wendekreis, innere Hüllkurve, Nachlaufachse, Sattelzug, Vektor-Export, Geradeausfahrt, Maßstab, Fahrweise 1: Tangentialität, Mindestradius, Radius wächst mit Abstand, Zielpunkt-Begrenzung, LKW); auch per `node -e "console.log(require('./js/sim.js').selfTest().filter(r => !r.ok))"` (leere Liste = alles bestanden).
 
 ## Aufbau
 - `index.html` – Oberfläche
 - `js/sim.js` – Kinematik ohne DOM
+- `js/export.js` – Vektor-Export (DXF, SVG) und Kontur des Bewegungsspielraums, ohne DOM, mit eigenen Tests (laufen im Selbsttest von `sim.js` mit)
 - `js/app.js` – Zeichnen, Werkzeuge, PDF
 - `vendor/` – pdf.js 3.11.174 (Apache-2.0, klassische Non-Module-Build, läuft unter `file://`)

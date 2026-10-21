@@ -591,6 +591,23 @@
     return info;
   };
 
+  /* The envelope lines of the swept path for a list of samples: an array of polylines (arrays of points, in meters).
+   * Each point of Sim.trailPoints has its own line. A line of a side point at a rigid axle is only an envelope line on the
+   * inner side of the turn. On the outer side, the body covers it. A line breaks where this changes.
+   * On a straight line, both side points are on the envelope. */
+  Sim.envelopeLines = function (smp, v) {
+    const info = Sim.trailInfo(v), lines = [], pen = [];
+    smp.forEach((p, i) => {
+      Sim.trailPoints(p, v).forEach((c, k) => {
+        const t = info[k].kind === 'side' ? Sim.turnSide(smp, i, info[k].body) : 0;
+        if (t !== 0 && t !== info[k].side) { pen[k] = null; return; }
+        if (!pen[k]) { pen[k] = []; lines.push(pen[k]); }
+        pen[k].push(c);
+      });
+    });
+    return lines.filter((l) => l.length > 1);          // A line with one point (a break right after the start) is not a line.
+  };
+
   /* The side of the center of rotation of a rigid body between the samples i and i + 1:
    * +1 = on the side y > 0 of the body, -1 = on the side y < 0, 0 = the body goes straight.
    * The body drives forward. Its direction increases when the center of rotation is on the side y > 0. */
@@ -712,6 +729,13 @@
       perpErr = Math.max(perpErr, Math.abs(Math.cos(a) * tr.gap + Math.sin(a) * yI));        // The wheel direction (cos a, sin a) is perpendicular to (gap, yI).
     }
     add('Nachlaufachse: Räder stehen senkrecht zur Linie zum Momentanpol der festen Achse', perpErr < 1e-9 && Sim.trailAngle(v, 0.3) === 0, 'Fehler ' + perpErr.toExponential(1));
+
+    // Envelope lines. In a turn, the line of the side point on the outer side is not an envelope line. The one on the inner side is.
+    // The circle runs in the direction of increasing angle, so the center of rotation is on the side y > 0 of the body.
+    const envLines = Sim.envelopeLines(run, v);
+    const sideLine = (side) => envLines.filter((l) => l.length > 100 && l.slice(Math.floor(l.length * 0.6)).every((c) => Math.abs(hyp(c.x, c.y) - (lim.rRear + side * v.width / 2)) < 0.01));
+    add('Hüllkurven: Seitenlinie nur auf der Kurveninnenseite', sideLine(-1).length === 1 && sideLine(1).length === 0 && envLines.length === 5,
+      envLines.length + ' Linien, innere Seitenlinie ' + (sideLine(-1).length ? 'ja' : 'nein') + ', äußere ' + (sideLine(1).length ? 'ja' : 'nein'));
 
     const line = [];
     for (let i = 0; i <= 400; i++) line.push({ x: i * 0.05, y: 0 });
@@ -958,6 +982,10 @@
     }
     add('Zielpunkt-Begrenzung (Gerade und Bogen gemischt): alle Routen fahrbar, ohne Sprünge', badMix === 0 && jumpMix === 0,
       totalMix + ' Punkte, davon ' + clampMix + ' begrenzt, ' + bigTurn + ' Wenden über 200 gon, ' + badMix + ' nicht fahrbar, ' + jumpMix + ' Sprünge');
+
+    // The tests of the vector export (js/export.js). In the browser, the file is loaded with a script tag.
+    const X = typeof require === 'function' ? require('./export.js') : root.Export;
+    if (X) X.selfTest(Sim).forEach((r) => res.push(r));
     return res;
   };
 

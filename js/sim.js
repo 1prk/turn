@@ -22,6 +22,7 @@
    * artic = true for an articulated vehicle (a bus with a joint). Then hitch, axle2, rearOver and knickGon are used:
    * hitch = distance from the middle axle to the joint, axle2 = distance from the joint to the rear axle,
    * rearOver = overhang behind the rear axle, knickGon = largest articulation angle in gon.
+   * placeholder = true marks a preset whose dimensions are not verified. The program shows a badge on the card of the vehicle.
    * kind = 'semi' is a semitrailer combination (Sattelzug). It is an articulated vehicle too (artic = true), with a NEGATIVE hitch:
    * the fifth wheel (kingpin) is in front of the center of the rear axles of the tractor. Then the values mean:
    * hitch = distance from the rear axle of the tractor to the kingpin (negative = in front of the axle),
@@ -52,7 +53,7 @@
     // The model rear axle is the center of the rear axles of the tractor. rear = hitch + axle2 + rearOver is the distance from it to the end.
     // rOuter = 12.50 m is the outer radius of the turning circle in § 32d StVZO. It is used as a placeholder too. The values for the fifth wheel are in Sim.SEMI_DEFAULTS.
     Object.assign({ name: 'Sattelzug 16,50 m', wb: 3.80, front: 1.40, rear: 11.30, width: 2.55, rOuter: 12.50, track: 2.05, ratio: 20, gap: 0, trail: false,
-      artic: true, kind: 'semi', preset: true }, Sim.SEMI_DEFAULTS)
+      artic: true, kind: 'semi', preset: true, placeholder: true }, Sim.SEMI_DEFAULTS)
   ];
   Sim.DEFAULT_VEHICLE = Object.assign({}, Sim.PRESETS[0]);
 

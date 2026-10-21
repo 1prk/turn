@@ -5,153 +5,290 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Schleppkurven-Prüfung</title>
 <style>
-  :root { --bg:#f4f5f7; --panel:#fff; --ink:#1d2330; --mute:#667085; --line:#d9dde4; --acc:#1f6feb; --bad:#d92d20; --ok:#1a7f37; --warn:#d97706; }
+  :root { --bg:#f4f5f7; --panel:#fff; --ink:#1d2330; --mute:#667085; --line:#d9dde4; --acc:#1f6feb; --accbg:#eef4ff; --accln:#cfe0ff;
+          --bad:#d92d20; --ok:#1a7f37; --okbg:#e8f6ec; --warn:#d97706; --warnbg:#fff4e0; --warnln:#f6d9a8; }
   * { box-sizing:border-box; }
+  [hidden] { display:none !important; }
   html,body { margin:0; height:100%; font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif; color:var(--ink); background:var(--bg); }
   #app { display:flex; height:100%; }
-  #side { width:330px; flex:none; overflow-y:auto; background:var(--panel); border-right:1px solid var(--line); padding:12px 14px 24px; }
+  #side { width:340px; flex:none; overflow-y:auto; background:var(--panel); border-right:1px solid var(--line); }
   #main { flex:1; position:relative; min-width:0; }
   canvas { position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
-  h1 { font-size:16px; margin:0 0 10px; }
-  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--mute); margin:18px 0 6px; border-top:1px solid var(--line); padding-top:12px; }
-  button, .btn { font:inherit; border:1px solid var(--line); background:#fff; border-radius:6px; padding:5px 9px; cursor:pointer; color:var(--ink); }
+  button, .btn { font:inherit; border:1px solid var(--line); background:#fff; border-radius:6px; padding:5px 10px; cursor:pointer; color:var(--ink); display:inline-block; }
   button:hover, .btn:hover { border-color:var(--acc); }
-  button.active { background:var(--acc); border-color:var(--acc); color:#fff; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  button.primary, .btn.primary { background:var(--acc); border-color:var(--acc); color:#fff; font-weight:600; }
+  button.primary:disabled { background:#b9cdf2; border-color:#b9cdf2; opacity:1; }
+  button.link { border:0; background:none; color:var(--acc); padding:2px 0; text-decoration:underline; }
   .row { display:flex; gap:6px; flex-wrap:wrap; margin:6px 0; align-items:center; }
   .grid { display:grid; grid-template-columns:1fr 84px; gap:4px 8px; align-items:center; }
   input[type=number] { width:100%; font:inherit; padding:3px 5px; border:1px solid var(--line); border-radius:5px; }
   input[type=range] { width:100%; }
-  .chip { padding:3px 9px; }
-  .keys { display:grid; grid-template-columns:auto 1fr; gap:3px 10px; align-items:center; }
-  kbd { font:11px/1 ui-monospace,monospace; border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; padding:2px 5px; background:#fafafa; }
   input[type=text] { width:100%; font:inherit; padding:3px 5px; border:1px solid var(--line); border-radius:5px; }
-  #hint { background:#eef4ff; border:1px solid #cfe0ff; border-radius:6px; padding:6px 8px; margin:8px 0; min-height:2.8em; }
+  kbd { font:10px/1 ui-monospace,monospace; border:1px solid var(--line); border-bottom-width:2px; border-radius:3px; padding:1px 4px; background:#fafafa; color:var(--mute); margin-left:4px; }
+  button.primary kbd { background:rgba(255,255,255,.18); border-color:rgba(255,255,255,.4); color:#fff; }
   .mute { color:var(--mute); }
-  .stat { display:grid; grid-template-columns:1fr auto; gap:2px 8px; }
-  .stat b { text-align:right; font-weight:600; }
+  .small { font-size:12px; }
   .bad { color:var(--bad); } .good { color:var(--ok); } .warn { color:var(--warn); }
-  #tests div { margin:2px 0; }
+  .stat, .kv { display:grid; grid-template-columns:1fr auto; gap:2px 8px; font-size:12px; margin:6px 0; }
+  .stat b, .kv b { text-align:right; font-weight:600; }
+  .grp { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--mute); margin:12px 0 4px; }
+  #tests div { margin:2px 0; font-size:12px; }
+
+  /* header with progress */
+  #head { padding:12px 14px 10px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--panel); z-index:2; }
+  #head h1 { font-size:15px; margin:0 0 8px; display:flex; justify-content:space-between; align-items:center; }
+  #dots { display:flex; gap:4px; }
+  #dots i { flex:1; height:6px; border-radius:3px; background:#e3e6eb; cursor:pointer; }
+  #dots i.done { background:var(--ok); } #dots i.cur { background:var(--acc); }
+  #dots i.opt { background:repeating-linear-gradient(90deg,#e3e6eb 0 4px,#fff 4px 6px); }
+  #dots i.cur.opt { background:repeating-linear-gradient(90deg,var(--acc) 0 4px,#fff 4px 6px); }
+
+  /* steps */
+  .step { border-bottom:1px solid var(--line); }
+  .step > header { display:flex; align-items:center; gap:10px; padding:10px 14px; cursor:pointer; }
+  .step > header:hover { background:#fafbfc; }
+  .num { width:22px; height:22px; border-radius:50%; flex:none; display:grid; place-items:center; font-size:12px; font-weight:700; background:#e3e6eb; color:var(--mute); }
+  .step.done .num { background:var(--ok); color:#fff; } .step.active .num { background:var(--acc); color:#fff; }
+  .step.opt .num { background:#fff; border:1px dashed #b5bac4; }
+  .ttl { flex:1; min-width:0; }
+  .ttl b { display:block; font-size:13px; }
+  .ttl span { display:block; color:var(--mute); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .step.active .ttl span, .step.active .edit { display:none; }
+  .step.todo .ttl b { color:var(--mute); font-weight:600; }
+  .edit { font-size:12px; color:var(--acc); }
+  .step .body { display:none; padding:2px 14px 14px; }
+  .step.active .body { display:block; }
+  .what { background:var(--accbg); border:1px solid var(--accln); border-radius:8px; padding:8px 10px; margin:0 0 10px; }
+  .what b { display:block; font-size:13px; }
+  .what small { color:var(--mute); font-size:12px; display:block; }
+  .what.warn { background:var(--warnbg); border-color:var(--warnln); } .what.warn b { color:var(--warn); }
+  .what.ok { background:var(--okbg); border-color:#bfe3c9; } .what.ok b { color:var(--ok); }
+  .nav { display:flex; justify-content:space-between; align-items:center; margin-top:12px; gap:8px; }
+  .drop { border:2px dashed #b5bac4; border-radius:10px; padding:14px 10px; text-align:center; color:var(--mute); }
+
+  /* vehicles */
+  .cards { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .card { border:1px solid var(--line); border-radius:8px; padding:6px 7px 7px; cursor:pointer; background:#fff; position:relative; font:inherit; text-align:left; color:var(--ink); }
+  .card:hover { border-color:var(--acc); }
+  .card.sel { border-color:var(--acc); box-shadow:0 0 0 2px var(--accln); background:var(--accbg); }
+  .card svg { display:block; width:100%; height:34px; }
+  .card b { display:block; font-size:12px; margin-top:2px; line-height:1.2; }
+  .card span.d { font-size:11px; color:var(--mute); }
+  .card .badge { position:absolute; top:5px; right:5px; font-size:10px; background:var(--warnbg); color:var(--warn); border:1px solid var(--warnln); border-radius:8px; padding:0 5px; }
+  .card .key { position:absolute; top:4px; left:5px; font-size:10px; color:var(--mute); }
+  .card.add { display:grid; place-items:center; min-height:70px; color:var(--acc); border-style:dashed; font-size:12px; }
+  details > summary { cursor:pointer; color:var(--acc); margin:8px 0; }
+
+  /* path */
+  .seg { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .seg button { display:flex; flex-direction:column; align-items:center; gap:2px; padding:7px 4px; text-align:center; line-height:1.15; font-size:12px; }
+  .seg button svg { width:34px; height:22px; }
+  .seg button.on { background:var(--accbg); border-color:var(--acc); box-shadow:0 0 0 1px var(--acc) inset; }
+  .chips { display:flex; gap:5px; flex-wrap:wrap; }
+  .chip { border-radius:14px; padding:2px 10px; font-size:12px; }
+  .chip.on { background:var(--acc); color:#fff; border-color:var(--acc); }
+
+  /* canvas overlays */
+  .float { position:absolute; background:rgba(255,255,255,.96); border:1px solid var(--line); border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,.18); }
+  #tools { top:12px; left:12px; display:flex; flex-direction:column; }
+  #tools button { border:0; border-radius:0; width:34px; height:32px; padding:0; font-size:16px; background:none; }
+  #tools button + button { border-top:1px solid var(--line); }
+  #tools button:first-child { border-radius:8px 8px 0 0; } #tools button:last-child { border-radius:0 0 8px 8px; }
+  #cue { left:50%; transform:translateX(-50%); top:12px; padding:7px 14px; background:#1d2330; color:#fff; border:0; border-radius:18px; font-size:13px; max-width:60%; text-align:center; pointer-events:none; }
+  #cue.warn { background:#b45309; }
+  #status { left:58px; bottom:12px; right:12px; width:fit-content; max-width:calc(100% - 70px); padding:6px 10px; display:flex; gap:6px 14px; flex-wrap:wrap; align-items:center; font-size:12px; }
+  #status b { font-weight:600; } #status .w { color:var(--warn); font-weight:600; }
+  #scalebox { padding:8px 10px; display:flex; gap:6px; align-items:center; transform:translate(10px,10px); }
+  #scalebox input { width:84px; }
+  #keys { inset:0; margin:auto; width:430px; height:fit-content; max-width:92%; padding:14px 18px; z-index:5; }
+  #keys h3 { margin:0 0 8px; font-size:14px; }
+  #keys .g { display:grid; grid-template-columns:110px 1fr; gap:4px 8px; align-items:center; }
+  #keys .g kbd { justify-self:start; margin:0 2px 0 0; }
+  #keys .g .h { color:var(--mute); font-size:11px; text-transform:uppercase; letter-spacing:.05em; margin-top:6px; }
   #drop { position:absolute; inset:0; display:none; align-items:center; justify-content:center; background:rgba(31,111,235,.15); font-size:20px; pointer-events:none; }
   #empty { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); background:#fff; padding:18px 24px; border-radius:10px; box-shadow:0 2px 12px rgba(0,0,0,.2); text-align:center; }
-  @media (max-width:760px){ #app{flex-direction:column} #side{width:100%;height:42%;border-right:0;border-bottom:1px solid var(--line)} }
+  @media (max-width:760px){ #app{flex-direction:column} #side{width:100%;height:45%;border-right:0;border-bottom:1px solid var(--line)} #cue{max-width:80%} }
 </style>
 </head>
 <body>
 <div id="app">
   <aside id="side">
-    <h1>Schleppkurven-Prüfung</h1>
+    <div id="head">
+      <h1><span>Schleppkurven-Prüfung</span><button class="link" id="helpBtn" title="Tastenkürzel (Taste ?)">Tastenkürzel<kbd>?</kbd></button></h1>
+      <div id="dots"></div>
+    </div>
+    <div class="warn small" id="presetNote" style="display:none;cursor:pointer;padding:6px 14px;background:var(--warnbg);border-bottom:1px solid var(--warnln)" title="Klicken zum Ausblenden"></div>
 
-    <h2 style="margin-top:6px;border:0;padding:0">1 · Lageplan</h2>
-    <div class="row">
-      <label class="btn">PDF laden…<input id="file" type="file" accept="application/pdf" hidden></label>
-      <button id="blank">Leere Fläche (Test)</button>
-    </div>
-    <div class="row" id="pageRow" style="display:none">Seite <input id="pageNo" type="number" min="1" value="1" style="width:64px"> <span id="pageCnt" class="mute"></span></div>
+    <!-- 1 Lageplan -->
+    <section class="step" id="step1">
+      <header><span class="num">1</span><div class="ttl"><b>Lageplan</b><span></span></div><span class="edit">ändern</span></header>
+      <div class="body">
+        <div class="what"><b></b><small></small></div>
+        <div class="drop">PDF hierher ziehen<br>
+          <label class="btn primary" style="margin-top:8px">PDF laden…<input id="file" type="file" accept="application/pdf" hidden></label></div>
+        <div class="row"><button class="link" id="blank">Ohne Plan testen (leere Fläche)</button></div>
+        <div class="row" id="pageRow" style="display:none">Seite <input id="pageNo" type="number" min="1" value="1" style="width:64px"> <span id="pageCnt" class="mute"></span></div>
+        <div class="nav"><span></span><button class="primary" data-go="2" data-need="plan">Weiter: Maßstab setzen →</button></div>
+      </div>
+    </section>
 
-    <h2>2 · Maßstab</h2>
-    <div class="row"><button data-tool="scale" title="Taste M">Maßstab setzen (M)</button><button id="scaleReset">Zurücksetzen</button></div>
-    <div id="scaleInfo" class="mute">nicht gesetzt</div>
+    <!-- 2 Maßstab -->
+    <section class="step" id="step2">
+      <header><span class="num">2</span><div class="ttl"><b>Maßstab</b><span></span></div><span class="edit">ändern</span></header>
+      <div class="body">
+        <div class="what"><b></b><small></small></div>
+        <div class="row need"><button data-go="1">Zum Lageplan</button></div>
+        <div class="work">
+          <div id="scaleInfo" class="mute small"></div>
+          <div class="row"><button id="scaleReset">Neu messen</button></div>
+          <div class="mute small">Der Plan lässt sich jederzeit mit der Maus verschieben (ziehen) und zoomen (Mausrad).</div>
+        </div>
+        <div class="nav"><button data-go="1">← Zurück</button><button class="primary" data-go="3" data-need="scale">Weiter: Fahrzeug wählen →</button></div>
+      </div>
+    </section>
 
-    <h2>3 · Fahrzeug</h2>
-    <div class="row" id="vehList"></div>
-    <div class="warn" id="presetNote" style="display:none;font-size:12px;cursor:pointer;margin:4px 0" title="Klicken zum Ausblenden"></div>
-    <div class="grid">
-      <label for="v_name">Name</label><input id="v_name" type="text">
-      <label for="v_wb">Radstand [m]</label><input id="v_wb" type="number" step="0.01">
-      <label for="v_front">Überhang vorn [m]</label><input id="v_front" type="number" step="0.01">
-      <label for="v_rear">Überhang hinten [m]</label><input id="v_rear" type="number" step="0.01">
-      <label for="v_width">Breite o. Spiegel [m]</label><input id="v_width" type="number" step="0.01">
-      <label for="v_rout">Wendekreisradius außen [m]</label><input id="v_rout" type="number" step="0.01">
-      <label for="v_track">Spurweite (Darstellung) [m]</label><input id="v_track" type="number" step="0.01">
-      <label for="v_ratio">Lenkübersetzung (Lenkrad : Rad)</label><input id="v_ratio" type="number" step="0.5" min="1">
-      <label for="v_gap">Abstand der Hinterachsen [m] (rechnet nur mit Nachlaufachse)</label><input id="v_gap" type="number" step="0.05" min="0">
-    </div>
-    <div class="row"><label title="Die hinterste Achse lenkt mit. Dann ist die vordere der beiden Hinterachsen die feste Achse: Der Momentanpol liegt auf ihrer Linie. Radstand und Überhang rechnen mit Radstand − Abstand/2 und Überhang + Abstand/2"><input type="checkbox" id="v_trail"> Nachlauflenkachse (hinterste Achse lenkt mit)</label></div>
-    <div class="row"><label title="Starres Fahrzeug, Gelenkbus (Gelenk hinter der Mittelachse) oder Sattelzug (Sattelkupplung vor der Hinterachse der Zugmaschine). Bei Gelenkfahrzeugen folgt die hintere Karosserie dem Gelenk">Bauart
-      <select id="v_kind"><option value="rigid">Starres Fahrzeug</option><option value="bus">Gelenkbus</option><option value="semi">Sattelzug</option></select></label></div>
-    <div class="grid" id="articBox" style="display:none">
-      <label for="v_hitch" id="l_hitch">Mittelachse bis Gelenk [m]</label><input id="v_hitch" type="number" step="0.01" min="0">
-      <label for="v_axle2" id="l_axle2">Gelenk bis Hinterachse [m]</label><input id="v_axle2" type="number" step="0.01" min="0">
-      <label for="v_rearOver" id="l_rearOver">Überhang hinter der Hinterachse [m]</label><input id="v_rearOver" type="number" step="0.01" min="0">
-      <label for="v_knick" id="l_knick">Max. Knickwinkel [gon]</label><input id="v_knick" type="number" step="1" min="1">
-    </div>
-    <div class="grid" id="semiBox" style="display:none">
-      <label for="v_tractorRear">Zugmaschine: Überhang hinter der Hinterachse [m]</label><input id="v_tractorRear" type="number" step="0.01" min="0">
-      <label for="v_trailerFront">Auflieger: Überhang vor dem Sattelzapfen [m]</label><input id="v_trailerFront" type="number" step="0.01" min="0">
-      <label for="v_trailerWidth">Auflieger: Breite [m]</label><input id="v_trailerWidth" type="number" step="0.01" min="0">
-    </div>
-    <div class="warn" id="semiNote" style="font-size:12px;display:none">Platzhalter: Die Maße des Sattelzugs sind plausible Annahmen, keine Werte der RBSV 2020. Vor dem Einsatz mit RBSV 2020, Anhang 1 abgleichen.</div>
-    <div class="mute" style="font-size:12px">Radstand und Überhang hinten beziehen sich auf die Mitte der hinteren Achsen. Mit Nachlaufachse rechnet das Modell mit der vorderen der beiden Hinterachsen (feste Achse).</div>
-    <div class="row"><button id="vehDel">Fahrzeug löschen</button><button id="vehReset">Voreinstellung wiederherstellen</button></div>
-    <div id="vInfo" class="mute" style="margin-top:6px"></div>
+    <!-- 3 Fahrzeug -->
+    <section class="step" id="step3">
+      <header><span class="num">3</span><div class="ttl"><b>Fahrzeug</b><span></span></div><span class="edit">ändern</span></header>
+      <div class="body">
+        <div class="what"><b></b><small></small></div>
+        <div class="cards" id="vehList"></div>
+        <div class="kv" id="vInfo"></div>
+        <details id="vehEditor"><summary>Fahrzeug bearbeiten…</summary>
+          <div class="grid">
+            <label for="v_name">Name</label><input id="v_name" type="text">
+            <label for="v_wb">Radstand [m]</label><input id="v_wb" type="number" step="0.01">
+            <label for="v_front">Überhang vorn [m]</label><input id="v_front" type="number" step="0.01">
+            <label for="v_rear">Überhang hinten [m]</label><input id="v_rear" type="number" step="0.01">
+            <label for="v_width">Breite o. Spiegel [m]</label><input id="v_width" type="number" step="0.01">
+            <label for="v_rout">Wendekreisradius außen [m]</label><input id="v_rout" type="number" step="0.01">
+            <label for="v_track">Spurweite (Darstellung) [m]</label><input id="v_track" type="number" step="0.01">
+            <label for="v_ratio">Lenkübersetzung (Lenkrad : Rad)</label><input id="v_ratio" type="number" step="0.5" min="1">
+            <label for="v_gap">Abstand der Hinterachsen [m] (rechnet nur mit Nachlaufachse)</label><input id="v_gap" type="number" step="0.05" min="0">
+          </div>
+          <div class="row"><label title="Die hinterste Achse lenkt mit. Dann ist die vordere der beiden Hinterachsen die feste Achse: Der Momentanpol liegt auf ihrer Linie. Radstand und Überhang rechnen mit Radstand − Abstand/2 und Überhang + Abstand/2"><input type="checkbox" id="v_trail"> Nachlauflenkachse (hinterste Achse lenkt mit)</label></div>
+          <div class="row"><label title="Starres Fahrzeug, Gelenkbus (Gelenk hinter der Mittelachse) oder Sattelzug (Sattelkupplung vor der Hinterachse der Zugmaschine). Bei Gelenkfahrzeugen folgt die hintere Karosserie dem Gelenk">Bauart
+            <select id="v_kind"><option value="rigid">Starres Fahrzeug</option><option value="bus">Gelenkbus</option><option value="semi">Sattelzug</option></select></label></div>
+          <div class="grid" id="articBox" style="display:none">
+            <label for="v_hitch" id="l_hitch">Mittelachse bis Gelenk [m]</label><input id="v_hitch" type="number" step="0.01" min="0">
+            <label for="v_axle2" id="l_axle2">Gelenk bis Hinterachse [m]</label><input id="v_axle2" type="number" step="0.01" min="0">
+            <label for="v_rearOver" id="l_rearOver">Überhang hinter der Hinterachse [m]</label><input id="v_rearOver" type="number" step="0.01" min="0">
+            <label for="v_knick" id="l_knick">Max. Knickwinkel [gon]</label><input id="v_knick" type="number" step="1" min="1">
+          </div>
+          <div class="grid" id="semiBox" style="display:none">
+            <label for="v_tractorRear">Zugmaschine: Überhang hinter der Hinterachse [m]</label><input id="v_tractorRear" type="number" step="0.01" min="0">
+            <label for="v_trailerFront">Auflieger: Überhang vor dem Sattelzapfen [m]</label><input id="v_trailerFront" type="number" step="0.01" min="0">
+            <label for="v_trailerWidth">Auflieger: Breite [m]</label><input id="v_trailerWidth" type="number" step="0.01" min="0">
+          </div>
+          <div class="mute small">Radstand und Überhang hinten beziehen sich auf die Mitte der hinteren Achsen. Mit Nachlaufachse rechnet das Modell mit der vorderen der beiden Hinterachsen (feste Achse).</div>
+          <div class="row"><button id="vehDel">Fahrzeug löschen</button><button id="vehReset">Voreinstellung wiederherstellen</button></div>
+        </details>
+        <div class="warn small" id="semiNote" style="display:none">Platzhalter: Die Maße des Sattelzugs sind plausible Annahmen, keine Werte der RBSV 2020. Vor dem Einsatz mit RBSV 2020, Anhang 1 abgleichen.</div>
+        <div class="nav"><button data-go="2">← Zurück</button><button class="primary" data-go="4">Weiter: Fahrlinie zeichnen →</button></div>
+      </div>
+    </section>
 
-    <h2>4 · Fahren (Fahrweise 1)</h2>
-    <div class="mute" style="font-size:12px">Die <b>Leitlinie</b> ist der Weg der <b>Mitte der Vorderachse</b>, nicht der Karosserie. Bei einer Wende ist „Querversatz 2R“ nur der Versatz der Leitlinie. Der <b>Platzbedarf</b> ist etwa der Wendekreisdurchmesser 2 · R<sub>außen</sub> des Fahrzeugs.</div>
-    <div class="row" id="routeList"></div>
-    <div class="row"><input id="r_name" type="text" style="flex:1;min-width:120px" title="Name der Fahrkurve"><button id="routeDel">Fahrkurve löschen</button></div>
-    <div class="row">
-      <button data-tool="drive" title="Taste F">Fahrlinie (F)</button>
-      <button data-tool="view" title="Taste Esc">Beenden (Esc)</button>
-    </div>
-    <div class="row">Nächster Abschnitt:
-      <button data-seg="line" title="Taste G: Gerade bis zum Punkt, an Ecken entsteht ein Bogen">Gerade / Ecke (G)</button>
-      <button data-seg="arc" title="Taste B: Kreisbogen vom Fahrzeugende durch den Punkt an der Maus">Bogen durch Punkt (B)</button>
-      <button data-seg="turn" title="Taste K: Kurve mit Richtungsänderung in gon und Radius, Taste W: Wende mit 200 gon">Kurve nach Winkel (K)</button>
-    </div>
-    <div class="row" id="turnRow">Kurve:
-      <input id="turnGon" type="number" value="200" min="1" max="390" step="5" style="width:68px" title="Richtungsänderung in gon. 200 gon = Wende in einem Zug. Der Querversatz der Leitlinie ist 2 · R, der Platzbedarf etwa der Wendekreisdurchmesser des Fahrzeugs"> gon
-      <label title="Radius gleich Wendekreis (voller Lenkeinschlag, Fahrweise 1)"><input type="checkbox" id="turnRmin" checked> Wendekreis</label>
-      <input id="turnR" type="number" value="" min="0" step="0.5" style="width:64px" disabled title="Radius der Vorderachsmitte in m. Nicht kleiner als der Wendekreis"> m
-    </div>
-    <div class="row">
-      <button id="driveUndo" title="Rücktaste oder Strg+Z">Letzten Punkt zurück</button>
-      <button id="driveReset">Fahrt neu starten</button>
-    </div>
-    <div id="hint"></div>
+    <!-- 4 Fahrlinie -->
+    <section class="step" id="step4">
+      <header><span class="num">4</span><div class="ttl"><b>Fahrlinie</b><span></span></div><span class="edit">ändern</span></header>
+      <div class="body">
+        <div class="what"><b></b><small></small></div>
+        <div class="row need"><button data-go="1">Zum Lageplan</button></div>
+        <div class="work">
+          <div class="chips" id="routeList" style="margin-bottom:6px"></div>
+          <div class="row"><input id="r_name" type="text" style="flex:1;min-width:120px" title="Name der Fahrkurve"><button id="routeDel">Löschen</button></div>
+          <div class="mute small" style="margin:8px 0 4px">Nächster Abschnitt</div>
+          <div class="seg">
+            <button data-seg="line" title="Taste G: Gerade bis zum Punkt, an Ecken entsteht ein Bogen"><svg viewBox="0 0 34 22"><path d="M2 18H18Q26 18 26 10V3" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="18" r="2.2" fill="currentColor"/></svg>Gerade / Ecke<kbd>G</kbd></button>
+            <button data-seg="arc" title="Taste B: Kreisbogen vom Fahrzeugende durch den Punkt an der Maus"><svg viewBox="0 0 34 22"><path d="M3 18Q18 18 29 5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M29 1L33 5L29 9L25 5Z" fill="currentColor"/></svg>Bogen durch Punkt<kbd>B</kbd></button>
+            <button data-seg="turn" title="Taste K: Kurve mit Richtungsänderung in gon und Radius"><svg viewBox="0 0 34 22"><path d="M4 18H16A7 7 0 0 0 16 4H8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 1L5 4L10 7" fill="none" stroke="currentColor" stroke-width="2"/></svg>Kurve nach Winkel<kbd>K</kbd></button>
+          </div>
+          <div class="mute small" id="segHelp" style="margin:4px 0"></div>
+          <div class="row" id="turnRow">Richtungsänderung
+            <input id="turnGon" type="number" value="200" min="1" max="390" step="5" style="width:68px" title="Richtungsänderung in gon. 200 gon = Wende in einem Zug. Der Querversatz der Leitlinie ist 2 · R, der Platzbedarf etwa der Wendekreisdurchmesser des Fahrzeugs"> gon
+            <label title="Radius gleich Wendekreis (voller Lenkeinschlag, Fahrweise 1)"><input type="checkbox" id="turnRmin" checked> Wendekreis</label>
+            <input id="turnR" type="number" value="" min="0" step="0.5" style="width:64px" disabled title="Radius der Vorderachsmitte in m. Nicht kleiner als der Wendekreis"> m
+          </div>
+          <div class="row"><button id="wende" title="Kurve mit 200 gon und Mindestradius">↺ Wende in einem Zug<kbd>W</kbd></button></div>
+          <div class="row"><button id="driveUndo" title="Rücktaste oder Strg+Z">↶ Letzten Punkt zurück<kbd>⌫</kbd></button><button class="link" id="driveReset">Neu beginnen</button></div>
+          <div class="mute small">Die <b>Leitlinie</b> ist der Weg der <b>Mitte der Vorderachse</b>, nicht der Karosserie. Bei einer Wende ist „Querversatz 2R“ nur der Versatz der Leitlinie. Der <b>Platzbedarf</b> ist etwa der Wendekreisdurchmesser 2 · R<sub>außen</sub> des Fahrzeugs.</div>
+        </div>
+        <div class="nav"><button data-go="3">← Zurück</button><button class="primary" data-go="5" data-need="route">Fahrlinie fertig →</button></div>
+      </div>
+    </section>
 
-    <h2>5 · Wiedergabe &amp; Anzeige</h2>
-    <div class="row"><button id="play">▶ Abspielen</button><span class="mute" id="posInfo"></span></div>
-    <input id="pos" type="range" min="0" max="1000" value="0">
-    <div class="row"><label><input type="checkbox" id="oSweep" checked> Hüllfläche</label>
-      <label><input type="checkbox" id="oSil" checked> Silhouetten alle</label>
-      <input id="silStep" type="number" min="0.5" step="0.5" value="2" style="width:56px"> m</div>
-    <div class="row"><label title="Bewegungsspielraum um die überstrichene Fläche der gewählten Fahrkurve. Die RBSV-Schablonen zeigen 0,50 m, auch 0,25 m ist möglich"><input type="checkbox" id="oClear"> Bewegungsspielraum</label>
-      <input id="clearM" type="number" min="0.05" max="5" step="0.05" value="0.5" style="width:60px" title="Breite des Bewegungsspielraums in m. Voreinstellung 0,50 m, zulässig auch 0,25 m"> m</div>
-    <div class="row"><button id="fit">Ansicht einpassen</button><button id="png" title="Bild des Bildschirms, nicht maßstäblich">PNG exportieren</button></div>
-    <div class="row"><button id="dxf" title="DXF (R12, ASCII) der gewählten Fahrkurve: Leitlinie, Hinterachse, Hüllkurven, Fahrzeug am Start und Ende, Bewegungsspielraum, Text">DXF exportieren</button>
-      <button id="svg" title="SVG der gewählten Fahrkurve mit denselben Ebenen wie das DXF">SVG exportieren</button>
-      <select id="expUnit" title="Einheit der Koordinaten im Vektor-Export. DXF: Ursprung unten links an der Planseite, y nach oben. SVG: Plankoordinaten, y nach unten">
-        <option value="m">Einheit: Meter</option><option value="pt">Einheit: Plan (pt), Maßstab im Text</option></select></div>
+    <!-- 5 Wiedergabe & Export -->
+    <section class="step" id="step5">
+      <header><span class="num">5</span><div class="ttl"><b>Wiedergabe &amp; Export</b><span></span></div><span class="edit">ändern</span></header>
+      <div class="body">
+        <div class="what"><b></b><small></small></div>
+        <div class="row need"><button data-go="4">Zur Fahrlinie</button></div>
+        <div class="work">
+          <div class="row"><button class="primary" id="play">▶ Abspielen<kbd>P</kbd></button><span class="mute" id="posInfo"></span></div>
+          <input id="pos" type="range" min="0" max="1000" value="0">
+          <div class="grp">Anzeige</div>
+          <div class="row"><label><input type="checkbox" id="oSweep" checked> Hüllfläche</label>
+            <label><input type="checkbox" id="oSil" checked> Silhouetten alle</label>
+            <input id="silStep" type="number" min="0.5" step="0.5" value="2" style="width:56px"> m</div>
+          <div class="row"><label title="Bewegungsspielraum um die überstrichene Fläche der gewählten Fahrkurve. Die RBSV-Schablonen zeigen 0,50 m, auch 0,25 m ist möglich"><input type="checkbox" id="oClear"> Bewegungsspielraum</label>
+            <input id="clearM" type="number" min="0.05" max="5" step="0.05" value="0.5" style="width:60px" title="Breite des Bewegungsspielraums in m. Voreinstellung 0,50 m, zulässig auch 0,25 m"> m</div>
+          <div class="grp">Ergebnis</div>
+          <div id="res" class="stat"></div>
+          <div class="grp">Exportieren</div>
+          <div class="row"><button id="png" title="Bild des Bildschirms, nicht maßstäblich">PNG</button>
+            <button id="dxf" title="DXF (R12, ASCII) der gewählten Fahrkurve: Leitlinie, Hinterachse, Hüllkurven, Fahrzeug am Start und Ende, Bewegungsspielraum, Text">DXF</button>
+            <button id="svg" title="SVG der gewählten Fahrkurve mit denselben Ebenen wie das DXF">SVG</button>
+            <select id="expUnit" title="Einheit der Koordinaten im Vektor-Export. DXF: Ursprung unten links an der Planseite, y nach oben. SVG: Plankoordinaten, y nach unten">
+              <option value="m">Einheit: Meter</option><option value="pt">Einheit: Plan (pt), Maßstab im Text</option></select></div>
+          <div class="row"><button class="link" id="moreRoute">＋ weitere Fahrkurve anlegen</button></div>
+        </div>
+        <div class="nav"><button data-go="4">← Zurück</button><button data-go="6">Debug →</button></div>
+      </div>
+    </section>
 
-    <h2>Tastenkürzel</h2>
-    <div class="keys">
-      <kbd>F</kbd><span>Fahrlinie bearbeiten</span>
-      <kbd>G</kbd><span>Abschnitt: Gerade / Ecke</span>
-      <kbd>B</kbd><span>Abschnitt: Bogen durch Punkt</span>
-      <kbd>K</kbd><span>Abschnitt: Kurve nach Winkel (gon, Radius)</span>
-      <kbd>W</kbd><span>Wende in einem Zug (Kurve mit 200 gon)</span>
-      <kbd>Esc</kbd><span>Fahrlinie beenden (erst Unfertiges verwerfen)</span>
-      <kbd>M</kbd><span>Maßstab setzen</span>
-      <kbd>⌫</kbd><span>letzten Punkt zurück (auch <kbd>Strg</kbd>+<kbd>Z</kbd>)</span>
-      <kbd>1</kbd>–<kbd>9</kbd><span>Fahrzeug wählen (für die gewählte Fahrkurve)</span>
-      <kbd>[</kbd> <kbd>]</kbd><span>Fahrkurve wechseln</span>
-      <kbd>P</kbd><span>Abspielen / Pause</span>
-      <kbd>0</kbd><span>Ansicht einpassen</span>
-      <kbd>+</kbd> <kbd>−</kbd><span>Zoom</span>
-      <kbd>Leertaste</kbd><span>halten: Plan verschieben</span>
-    </div>
-
-    <h2>Ergebnis</h2>
-    <div id="res" class="stat"></div>
-
-    <h2>Selbsttest</h2>
-    <div class="row"><button id="selftest">Kinematik prüfen</button></div>
-    <div id="tests"></div>
+    <!-- 6 Debug -->
+    <section class="step opt" id="step6">
+      <header><span class="num">·</span><div class="ttl"><b>Debug (optional)</b><span></span></div><span class="edit">öffnen</span></header>
+      <div class="body">
+        <div class="what"><b></b><small></small></div>
+        <div class="row"><button id="selftest">Kinematik prüfen</button><span class="mute small" id="testInfo">dauert ca. 10 s</span></div>
+        <div id="tests"></div>
+        <div class="grp">Hilfslinien</div>
+        <div class="row"><label title="Momentanpol des Vorderkörpers: Schnittpunkt der Achsnormalen. Er liegt auf der Linie der starren Achse"><input type="checkbox" id="oIcr"> Momentanpol</label></div>
+        <div class="row"><label><input type="checkbox" id="oRear" checked> Spur der Hinterachse</label></div>
+        <div class="row"><label><input type="checkbox" id="oHud" checked> Lenkrad-Anzeige</label></div>
+        <div class="grp">Wert an der Position des Fahrzeugs</div>
+        <div id="dbg" class="stat"></div>
+        <div class="nav"><button data-go="5">← Zurück</button><span></span></div>
+      </div>
+    </section>
   </aside>
 
   <main id="main">
     <canvas id="cv"></canvas>
-    <div id="empty">PDF-Lageplan hierher ziehen oder links laden.<br><span class="mute">Alternativ „Leere Fläche (Test)“.</span></div>
+    <div id="empty">PDF-Lageplan hierher ziehen<br><span class="mute">oder links in Schritt 1 laden.</span></div>
+    <div class="float" id="tools"><button id="zIn" title="Vergrößern (+)">＋</button><button id="zOut" title="Verkleinern (−)">－</button><button id="fit" title="Ansicht einpassen (0)">⤢</button><button id="undoBtn" title="Letzten Punkt zurück (⌫)">↶</button></div>
+    <div class="float" id="cue" hidden></div>
+    <div class="float" id="scalebox" hidden>Länge <input id="scaleLen" type="number" step="0.01" min="0" placeholder="z. B. 3,50"> m
+      <button class="primary" id="scaleOk" title="Enter">OK<kbd>↵</kbd></button><button id="scaleCancel" title="Esc">✕</button></div>
+    <div class="float" id="status" hidden></div>
+    <div class="float" id="keys" hidden><h3>Tastenkürzel <span class="mute small">(alles geht auch mit Buttons)</span></h3>
+      <div class="g">
+        <span class="h">Fahrlinie</span><span></span>
+        <span><kbd>G</kbd><kbd>B</kbd><kbd>K</kbd></span><span>Abschnitt: Gerade / Bogen / Kurve nach Winkel</span>
+        <span><kbd>W</kbd></span><span>Wende in einem Zug (200 gon)</span>
+        <span><kbd>⌫</kbd></span><span>letzten Punkt zurück (auch <kbd>Strg</kbd>+<kbd>Z</kbd>)</span>
+        <span><kbd>Esc</kbd></span><span>laufende Eingabe abbrechen</span>
+        <span class="h">Ansicht</span><span></span>
+        <span><kbd>Leertaste</kbd></span><span>halten: Plan verschieben</span>
+        <span><kbd>+</kbd><kbd>−</kbd><kbd>0</kbd></span><span>Zoom / Ansicht einpassen</span>
+        <span class="h">Sonstiges</span><span></span>
+        <span><kbd>P</kbd></span><span>Abspielen / Pause</span>
+        <span><kbd>1</kbd>–<kbd>9</kbd></span><span>Fahrzeug wählen</span>
+        <span><kbd>?</kbd></span><span>diese Übersicht</span>
+      </div>
+      <div class="row" style="justify-content:flex-end"><button id="keysClose">Schließen<kbd>Esc</kbd></button></div></div>
     <div id="drop">PDF ablegen</div>
   </main>
 </div>

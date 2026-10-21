@@ -6,6 +6,7 @@
   const $ = (id) => document.getElementById(id);
   const cv = $('cv'), ctx = cv.getContext('2d');
   const SNAP_PX = 9;            // The pick radius for the start point and the other points [px].
+  const PLAY_HTML = '▶ Abspielen<kbd>P</kbd>', PAUSE_HTML = '❚❚ Pause<kbd>P</kbd>';
 
   const S = {
     pageImg: null, pw: 1200, ph: 850,   // The page image and the page size [pt].
@@ -16,7 +17,12 @@
     pend: null,                         // The start point. It waits for the click of the direction.
     wps: [],                            // The points of the guide line [pt]: { x, y, t }. The value t is 'line' or 'arc'.
     prev: null,                         // The live preview of the next move.
-    tool: 'scale',
+    tool: 'view',                       // The tool follows the step: 'scale' (step 2), 'drive' (step 4), else 'view'.
+    step: 1,                            // The step of the guide (1 to 6).
+    fileName: null, numPages: 0, pageNo: 1,
+    scaleLen: null, scaleBackup: null,  // The length that the user typed. The old scale, while the user measures again.
+    note: null,                         // A short message for the user: { text, warn }.
+    vehSeen: false, exported: false,
     zoom: 1, ox: 0, oy: 0,              // The view: screen = plan * zoom + offset.
     pos: 0, playing: false,
     valid: 0,                           // The number of points that the vehicle can drive.
@@ -84,7 +90,8 @@
 
   /* ---------- load a plan ---------- */
   function resetProject() {
-    S.mpp = null; S.scalePts = []; S.scaleDone = false;
+    S.mpp = null; S.scalePts = []; S.scaleDone = false; S.scaleLen = null; S.scaleBackup = null;
+    S.exported = false; S.note = null;
     S.start = null; S.pend = null; S.wps = []; S.prev = null;
     S.pos = 1; S.playing = false;
     S.routes = [newRoute('Fahrkurve 1')]; S.ri = 0;
@@ -102,10 +109,10 @@
     c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
     await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
     resetProject();
-    S.pageImg = c; S.pw = vp1.width; S.ph = vp1.height; S.hasPage = true;
+    S.pageImg = c; S.pw = vp1.width; S.ph = vp1.height; S.hasPage = true; S.pageNo = n;
     $('empty').style.display = 'none';
     fitView(); recompute();
-    setTool('scale');
+    goStep(2);
   }
 
   async function loadPdf(file) {
@@ -114,6 +121,7 @@
     try {
       pdfDoc = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
     } catch (err) { alert('PDF konnte nicht gelesen werden: ' + err.message); return; }
+    S.fileName = file.name; S.numPages = pdfDoc.numPages;
     $('pageRow').style.display = pdfDoc.numPages > 1 ? 'flex' : 'none';
     $('pageNo').value = 1; $('pageNo').max = pdfDoc.numPages;
     $('pageCnt').textContent = 'von ' + pdfDoc.numPages;
@@ -122,25 +130,45 @@
 
   function loadBlank() {
     resetProject();
-    pdfDoc = null; S.pageImg = null; S.pw = 2000; S.ph = 1400; S.hasPage = true;
+    pdfDoc = null; S.fileName = null; S.numPages = 0; S.pageImg = null; S.pw = 2000; S.ph = 1400; S.hasPage = true;
     S.mpp = 0.05;       // The preset scale for tests: 20 pt = 1 m.
     S.scaleDone = true;
     $('pageRow').style.display = 'none';
     $('empty').style.display = 'none';
-    fitView(); recompute(); setTool('drive');
+    fitView(); recompute();
+    goStep(3);
   }
 
   /* ---------- scale ---------- */
+  // Two points are set. The user types the real length in the box at the line.
   function finishScale() {
-    const pts = S.scalePts;
-    if (pts.length < 2) return;
-    const ans = prompt('Länge der Strecke zwischen den beiden Punkten in m:', '');
-    const m = ans == null ? NaN : parseFloat(String(ans).replace(',', '.'));
-    if (!(m > 0)) { S.scalePts = []; requestDraw(); return; }
-    S.mpp = Sim.scaleFromPolyline(pts, m);
-    S.scaleDone = true;
-    S.scaleLen = m;
+    if (S.scalePts.length < 2) return;
+    const input = $('scaleLen');
+    input.value = '';
+    updateInfo(); requestDraw();
+    setTimeout(() => input.focus(), 0);
+  }
+
+  function confirmScale() {
+    const m = parseFloat(String($('scaleLen').value).replace(',', '.'));
+    const mpp = m > 0 ? Sim.scaleFromPolyline(S.scalePts, m) : null;
+    if (!mpp) { note('Bitte die Länge der Strecke in Metern eintragen (größer als 0).'); $('scaleLen').focus(); return; }
+    S.mpp = mpp; S.scaleDone = true; S.scaleLen = m; S.scaleBackup = null;
     recompute();
+    goStep(3);
+  }
+
+  // Drop the points that the user did not confirm. A scale that was confirmed before comes back.
+  function cancelScale() {
+    if (S.scaleBackup) { S.scalePts = S.scaleBackup.pts; S.scaleLen = S.scaleBackup.len; S.scaleDone = true; S.scaleBackup = null; }
+    else S.scalePts = [];
+    updateInfo(); requestDraw();
+  }
+
+  // Measure again. The old scale stays until the user confirms the new one.
+  function startMeasure() {
+    if (S.scaleDone && S.mpp && !S.scaleBackup) S.scaleBackup = { pts: S.scalePts, len: S.scaleLen };
+    S.scalePts = []; S.scaleDone = false;
   }
 
   /* ---------- calculation ---------- */
@@ -281,57 +309,186 @@
   const f = (x, d) => x.toFixed(d).replace('.', ',');
   const gon = Sim.gon;        // All angles in the user interface are in gon. 400 gon is a full circle.
 
-  /* The articulation angle that the turning circle needs, compared with the limit of the vehicle. */
-  function articInfo() {
-    if (!veh.artic) return '';
+  // Set the text only when it changes. The panel updates at each mouse move.
+  function setText(el, t) { if (el.textContent !== t) el.textContent = t; }
+  function setHtml(el, h) { if (el._html !== h) { el.innerHTML = h; el._html = h; } }
+  const kvHtml = (rows) => rows.map((r) => '<span>' + r[0] + '</span><b>' + r[1] + '</b>').join('');
+
+  /* The rows for the articulation angle that the turning circle needs, compared with the limit of the vehicle. */
+  function articRows() {
+    if (!veh.artic) return [];
     const st = Sim.articSteady(veh);
-    if (st == null) return ' · <span class="bad">Gelenkmaße passen nicht</span>';
+    if (st == null) return [['Gelenk', '<span class="bad">Maße passen nicht</span>']];
     const ok = veh.knickGon * Math.PI / 200 >= st;
-    return ' · Knickwinkel im Wendekreis ' + f(gon(st), 1) + ' gon, Grenzwert ' + f(veh.knickGon, 1) + ' gon' +
-      (ok ? '' : ' <span class="bad">(zu klein für den Wendekreis)</span>');
+    return [['Knickwinkel im Wendekreis', f(gon(st), 1) + ' gon'],
+            ['Grenzwert Knickwinkel', f(veh.knickGon, 1) + ' gon' + (ok ? '' : ' <span class="bad">zu klein</span>')]];
+  }
+
+  /* The rows of the result in step 5. */
+  function resultRows() {
+    const R = S.res, rows = [];
+    if (!R || !S.start) return rows;
+    rows.push(['Weglänge', f(R.length, 1) + ' m']);
+    rows.push(['Richtungsänderung', f(Math.abs(gon(R.turn)), 1) + ' gon ' + (Math.abs(R.turn) < 1e-3 ? '' : R.turn > 0 ? '(rechts)' : '(links)')]);
+    rows.push(['Max. Lenkwinkel', f(gon(R.maxD), 1) + ' gon von ' + f(gon(R.lim.delta), 1) + ' gon']);
+    rows.push(['Lenkung am Anschlag', R.satLen > 0.01 ? '<span class="warn">' + f(R.satLen, 1) + ' m</span>' : 'nein']);
+    if (veh.artic) rows.push(['Knickwinkel max.', f(gon(R.maxPhi), 1) + ' gon von ' + f(veh.knickGon, 1) + ' gon']);
+    rows.push(['Wendekreis ⌀ (Platzbedarf einer Wende)', f(2 * veh.rOuter, 2) + ' m']);
+    if (R.lastArc && Math.abs(gon(R.lastArc.delta)) >= 150) rows.push(['Querversatz der Leitlinie 2R', f(2 * R.lastArc.R, 2) + ' m (nur die Leitlinie)']);
+    rows.push(['Leitlinie', 'Mitte der Vorderachse']);
+    if (R.fail) rows.push(['Fahrlinie', '<span class="bad">' + failShort(R.fail) + '</span>']);
+    if (S.valid < S.wps.length) rows.push(['Ungültige Punkte', '<span class="bad">ab Punkt ' + (S.valid + 1) + ' (Strecke zu kurz)</span>']);
+    return rows;
   }
 
   function updateInfo() {
-    const lim = Sim.steerLimit(veh);
-    $('vInfo').innerHTML = 'Länge gesamt ' + f(veh.front + veh.wb + veh.rear, 2) + ' m · ' + (lim
-      ? 'Wendekreis ⌀ ' + f(2 * veh.rOuter, 2) + ' m · max. Lenkwinkel ' + f(gon(lim.delta), 1) + ' gon · Radius Hinterachse ' + f(lim.rRear, 2) + ' m' + articInfo()
-      : '<span class="bad">Wendekreis passt nicht zu den Maßen</span>');
-    if (S.mpp) {
+    const lim = Sim.steerLimit(veh), R = S.res;
+    setHtml($('vInfo'), kvHtml(lim
+      ? [['Länge × Breite', f(veh.front + veh.wb + veh.rear, 2) + ' × ' + f(veh.width, 2) + ' m'], ['Wendekreis ⌀ (Platzbedarf)', f(2 * veh.rOuter, 2) + ' m'],
+         ['max. Lenkwinkel', f(gon(lim.delta), 1) + ' gon'], ['Radius Hinterachse im Wendekreis', f(lim.rRear, 2) + ' m']].concat(articRows())
+      : [['Wendekreis', '<span class="bad">passt nicht zu den Maßen</span>']]));
+    if (S.mpp && S.scaleDone) {
       const ratio = 1000 * S.mpp / 0.352778;   // The paper scale 1:x, if the PDF page has the true size.
-      $('scaleInfo').innerHTML = '1 m = ' + f(1 / S.mpp, 2) + ' pt · ca. 1:' + Math.round(ratio) + ' (bei Originalgröße)';
-    } else {
-      $('scaleInfo').textContent = S.tool === 'scale'
-        ? 'Zwei Punkte einer bekannten Strecke anklicken.' : 'nicht gesetzt';
+      setText($('scaleInfo'), '1 m = ' + f(1 / S.mpp, 2) + ' pt · ca. 1:' + Math.round(ratio) + ' (bei Originalgröße)' + (S.scaleLen ? ' · gemessen ' + f(S.scaleLen, 2) + ' m' : ''));
+    } else setText($('scaleInfo'), 'Noch nicht gesetzt.');
+    setHtml($('res'), kvHtml(resultRows()));
+    const q = R && S.start ? R.smp[sampleIndex()] : null;
+    setHtml($('dbg'), q ? kvHtml([['Weg s', f(q.s, 1) + ' von ' + f(R.length, 1) + ' m'], ['Lenkwinkel', f(gon(q.d), 1) + ' gon'],
+      ['Lenkrad', f(gon(q.d) * veh.ratio, 0) + ' gon (max. ' + f(gon(R.maxD) * veh.ratio, 0) + ' von ' + f(gon(R.lim.delta) * veh.ratio, 0) + ')'],
+      ['Fahrzeugwinkel', f(gon(q.th), 1) + ' gon']].concat(veh.artic ? [['Knickwinkel', f(gon(q.phi), 1) + ' gon']] : [])) : '<span class="mute small">Noch keine Fahrlinie.</span>');
+    setText($('posInfo'), R && S.start ? f(R.smp[sampleIndex()].s, 1) + ' / ' + f(R.length, 1) + ' m' : '');
+    updateGuide();
+  }
+
+  /* ---------- guided steps ---------- */
+  // A short message for the user. It goes away at the next click, at a change of the step, or after 9 s.
+  function note(text, warn) {
+    const n = S.note = text ? { text: text, warn: warn !== false } : null;
+    if (n) setTimeout(() => { if (S.note === n) { S.note = null; updateGuide(); } }, 9000);
+    updateGuide();
+  }
+
+  const stepDone = (n) => (n === 1 ? S.hasPage : n === 2 ? !!S.mpp && S.scaleDone : n === 3 ? S.vehSeen
+    : n === 4 ? !!S.start && S.wps.length > 0 && routeOk() : n === 5 ? S.exported : false);
+
+  /* What is missing for a step: { title, text, go, btn }, or null. The steps can always be opened. They say what is missing. */
+  function gateOf(n) {
+    if ((n === 2 || n === 4) && !S.hasPage) return { title: 'Es fehlt noch der Plan', text: 'Lade zuerst einen Lageplan (PDF) oder nutze die leere Fläche zum Testen.', go: 1, btn: 'Zum Lageplan' };
+    if (n === 4 && !(S.mpp && S.scaleDone)) return { title: 'Es fehlt noch der Maßstab', text: 'Ohne Maßstab lässt sich keine Fahrlinie rechnen.', go: 2, btn: 'Zum Maßstab' };
+    if (n === 5 && !(S.res && S.start && S.wps.length)) {
+      const go = !S.hasPage ? 1 : !(S.mpp && S.scaleDone) ? 2 : 4;
+      return { title: 'Es gibt noch keine Fahrlinie', text: 'Zeichne zuerst eine Fahrlinie.', go: go, btn: ['', 'Zum Lageplan', 'Zum Maßstab', '', 'Zur Fahrlinie'][go] };
     }
-    const R = S.res, P = S.prev, rows = [];
-    if (!S.mpp) rows.push(['Status', '<span class="warn">Maßstab fehlt</span>']);
-    else if (!S.start) rows.push(['Status', '<span class="mute">Startpunkt und ersten Punkt der Leitlinie setzen</span>']);
-    else if (R) {
-      rows.push(['Weglänge', f(R.length, 1) + ' m']);
-      rows.push(['Richtungsänderung', f(Math.abs(gon(R.turn)), 1) + ' gon ' + (Math.abs(R.turn) < 1e-3 ? '' : R.turn > 0 ? '(rechts)' : '(links)')]);
-      rows.push(['Leitlinie', 'Mitte der Vorderachse']);
-      rows.push(['Wendekreis ⌀ (Platzbedarf einer Wende)', f(2 * veh.rOuter, 2) + ' m']);
-      if (R.lastArc && Math.abs(gon(R.lastArc.delta)) >= 150) rows.push(['Querversatz der Leitlinie 2R', f(2 * R.lastArc.R, 2) + ' m (nur die Leitlinie)']);
-      rows.push(['Max. Lenkwinkel', f(gon(R.maxD), 1) + ' gon von ' + f(gon(R.lim.delta), 1) + ' gon']);
-      rows.push(['Lenkrad max.', f(gon(R.maxD) * veh.ratio, 0) + ' gon von ' + f(gon(R.lim.delta) * veh.ratio, 0) + ' gon']);
-      rows.push(['Lenkung am Anschlag', R.satLen > 0.01 ? '<span class="warn">' + f(R.satLen, 1) + ' m</span>' : 'nein']);
-      if (veh.artic) rows.push(['Knickwinkel max.', f(gon(R.maxPhi), 1) + ' gon von ' + f(veh.knickGon, 1) + ' gon']);
-      if (R.fail) rows.push(['Leitlinie', '<span class="bad">' + failShort(R.fail) + '</span>']);
-      if (S.valid < S.wps.length) rows.push(['Ungültige Punkte', '<span class="bad">ab Punkt ' + (S.valid + 1) + ' (Strecke zu kurz)</span>']);
-      const q = R.smp[sampleIndex()];
-      rows.push(['Position ' + f(q.s, 1) + ' m', 'Lenkwinkel ' + f(gon(q.d), 1) + ' gon' + (veh.artic ? ', Knick ' + f(gon(q.phi), 1) + ' gon' : '')]);
+    return null;
+  }
+
+  const SEG_HELP = { line: 'Geraden mit einem Bogen an jeder Ecke. Je weiter die Punkte auseinander liegen, desto größer die Kurve.',
+    arc: 'Ein Kreisbogen vom Ende der Fahrlinie durch den Punkt an der Maus. Liegt der Punkt gegenüber, entsteht ein Halbkreis.',
+    turn: 'Ein Bogen mit der Richtungsänderung in gon (RBSV-Schablone). 200 gon sind eine Wende in einem Zug.' };
+
+  /* What the user can do now: { kind: 'info' | 'ok' | 'warn', title, text, cue }. The cue is the short text at the top of the plan. */
+  function promptFor(n) {
+    const g = gateOf(n);
+    if (g) return { kind: 'warn', title: g.title, text: g.text, cue: '' };
+    if (S.note) return { kind: S.note.warn ? 'warn' : 'info', title: S.note.warn ? 'Das geht so nicht' : 'Hinweis', text: S.note.text, cue: S.note.text };
+    const R = S.res, P = S.prev, k = S.scalePts.length;
+    if (n === 1) return S.hasPage ? { kind: 'ok', title: 'Plan geladen', text: 'Weiter mit dem Maßstab. Ein anderer Plan lässt sich jederzeit laden.', cue: '' }
+      : { kind: 'info', title: 'Lageplan als PDF laden', text: 'Datei in das Fenster ziehen oder auswählen. Zum Ausprobieren geht auch die leere Fläche.', cue: '' };
+    if (n === 2) {
+      if (S.mpp && S.scaleDone) return { kind: 'ok', title: 'Maßstab gesetzt', text: 'Weiter mit dem Fahrzeug. Zum Neumessen „Neu messen“ klicken.', cue: '' };
+      if (k === 0) return { kind: 'info', title: 'Zwei Punkte einer bekannten Strecke anklicken', text: 'Zum Beispiel eine Bemaßung, die Fahrbahnbreite oder ein Fahrstreifen im Plan.', cue: 'Klick auf den ersten Punkt der Strecke' };
+      if (k === 1) return { kind: 'info', title: 'Jetzt den zweiten Punkt anklicken', text: 'Je länger die Strecke, desto genauer der Maßstab.', cue: 'Klick auf den zweiten Punkt' };
+      return { kind: 'info', title: 'Wie lang ist die Strecke in Wirklichkeit?', text: 'Die Länge im Feld am Plan eintragen und mit Enter bestätigen. Esc verwirft die Punkte.', cue: 'Länge der Strecke eintragen, Enter bestätigt' };
     }
-    if (P) {
-      rows.push(['Vorschau', !P.ok ? '<span class="bad">' + failShort(P.fail) + '</span>'
-        : P.clamped ? '<span class="warn">begrenzt: weiter geht es nicht</span>' : '<span class="good">fahrbar</span>']);
-      rows.push(['Vorschau: Richtungsänderung', f(Math.abs(gon(P.turn)), 1) + ' gon']);
-      if (P.lastArc) rows.push(['Vorschau: Bogen der Leitlinie', 'R = ' + f(P.lastArc.R, 1) + ' m · ' + f(Math.abs(gon(P.lastArc.delta)), 1) + ' gon']);
-      if (P.lastArc && Math.abs(gon(P.lastArc.delta)) >= 150) rows.push(['Vorschau: Querversatz der Leitlinie 2R', f(2 * P.lastArc.R, 2) + ' m (Platzbedarf etwa Wendekreis ⌀ ' + f(2 * veh.rOuter, 2) + ' m)']);
-      rows.push(['Vorschau: Lenkwinkel max.', f(gon(P.maxD), 1) + ' gon (Lenkrad ' + f(gon(P.maxD) * veh.ratio, 0) + ' gon)']);
-      if (veh.artic) rows.push(['Vorschau: Knickwinkel max.', f(gon(P.maxPhi), 1) + ' gon von ' + f(veh.knickGon, 1) + ' gon']);
+    if (n === 3) return { kind: 'info', title: 'Bemessungsfahrzeug wählen', text: 'Gilt für „' + S.routes[S.ri].name + '“. Das Fahrzeug lässt sich später noch wechseln.', cue: '' };
+    if (n === 4) {
+      if (!S.start) return S.pend ? { kind: 'info', title: 'Richtung der ersten Geraden klicken', text: 'Der zweite Klick legt Fahrtrichtung und erste Gerade fest.', cue: 'Klick: Richtung der ersten Geraden' }
+        : { kind: 'info', title: 'Startpunkt klicken', text: 'Setze die Mitte der Vorderachse an den Anfang der Fahrlinie.', cue: 'Klick: Startpunkt der Vorderachsmitte' };
+      if (S.valid < S.wps.length) return { kind: 'warn', title: 'Ungültige Punkte ab Punkt ' + (S.valid + 1), text: 'Die Strecken davor sind zu kurz für die Kurven. Mit ⌫ zurücknehmen oder ein anderes Fahrzeug wählen.', cue: 'Ungültige Punkte: mit ⌫ zurücknehmen' };
+      if (R && R.fail) return { kind: 'warn', title: 'Die Fahrlinie ist nicht fahrbar', text: failText(R.fail), cue: failShort(R.fail) };
+      if (P && !P.ok) return { kind: 'warn', title: 'Dort nicht fahrbar', text: failText(P.fail), cue: 'Dort nicht fahrbar: ' + failShort(P.fail) };
+      if (P && P.clamped) return { kind: 'warn', title: 'Weiter geht es dort nicht', text: 'Ein Klick setzt den nächstmöglichen Punkt (orange).', cue: 'Weiter geht es dort nicht: Punkt wird begrenzt' };
+      return S.seg === 'arc' ? { kind: 'info', title: 'Punkt für den Bogen klicken', text: 'Der Bogen geht vom Ende der Fahrlinie durch den Punkt an der Maus.', cue: 'Klick: Punkt, durch den der Bogen geht' }
+        : S.seg === 'turn' ? { kind: 'info', title: 'Kurve setzen', text: 'Die Maus links oder rechts vom Fahrzeug wählt die Drehrichtung. Richtungsänderung und Radius stehen darunter.', cue: 'Klick: Kurve setzen (Maus links/rechts = Drehrichtung)' }
+        : { kind: 'info', title: 'Nächsten Punkt klicken', text: 'An jedem Eckpunkt entsteht ein Bogen. Zurücknehmen mit ⌫.', cue: 'Klick: nächster Punkt' };
     }
-    $('res').innerHTML = rows.map((r) => '<span>' + r[0] + '</span><b>' + r[1] + '</b>').join('');
-    $('posInfo').textContent = R ? f(R.smp[sampleIndex()].s, 1) + ' / ' + f(R.length, 1) + ' m' : '';
+    if (n === 5) {
+      if (R && R.fail) return { kind: 'warn', title: 'Die Fahrlinie ist nicht fahrbar', text: failText(R.fail), cue: '' };
+      if (S.valid < S.wps.length) return { kind: 'warn', title: 'Ungültige Punkte ab Punkt ' + (S.valid + 1), text: 'Zurück zur Fahrlinie und die Punkte prüfen.', cue: '' };
+      return { kind: 'ok', title: 'Fahrlinie ist fahrbar', text: 'Fahrzeug abspielen, Anzeige wählen, Ergebnis exportieren.', cue: '' };
+    }
+    return { kind: 'info', title: 'Nur für die Entwicklung', text: 'Prüft die Kinematik und zeigt Hilfslinien. Für die normale Arbeit nicht nötig.', cue: '' };
+  }
+
+  function stepSummary(n) {
+    if (n === 1) return !S.hasPage ? 'noch kein Plan geladen' : S.fileName ? S.fileName + (S.numPages > 1 ? ' · Seite ' + S.pageNo + ' von ' + S.numPages : '') : 'Leere Fläche (Test)';
+    if (n === 2) return S.mpp && S.scaleDone ? '1 m = ' + f(1 / S.mpp, 2) + ' pt · ca. 1:' + Math.round(1000 * S.mpp / 0.352778) : 'noch nicht gesetzt';
+    if (n === 3) return veh.name + ' · Wendekreis ⌀ ' + f(2 * veh.rOuter, 2) + ' m';
+    if (n === 4) return !S.start ? 'noch keine Fahrlinie' : S.routes[S.ri].name + ' · ' + S.wps.length + ' Punkte' + (S.res ? ' · ' + f(S.res.length, 1) + ' m' : '');
+    if (n === 5) return S.exported ? 'exportiert' : 'Abspielen, Anzeige, Export';
+    return 'Selbsttest, Hilfslinien';
+  }
+
+  /* The numbers at the bottom of the plan in the steps 4 and 5. In step 4, they are the numbers of the preview. */
+  function statusHtml() {
+    const R = S.res, P = S.step === 4 ? S.prev : null, A = P || R;
+    if (!A || !R || !S.start || (S.step !== 4 && S.step !== 5)) return '';
+    const lim = R.lim, c = [], q = S.step === 5 ? R.smp[sampleIndex()] : null;
+    if (P) c.push(!P.ok ? '<span class="bad"><b>' + failShort(P.fail) + '</b></span>' : P.clamped ? '<span class="w">begrenzt</span>' : '<span class="good"><b>fahrbar</b></span>');
+    c.push(q ? 'Lenkwinkel jetzt <b>' + f(gon(Math.abs(q.d)), 1) + '</b> / ' + f(gon(lim.delta), 1) + ' gon' : 'Lenkwinkel max. <b>' + f(gon(A.maxD), 1) + '</b> / ' + f(gon(lim.delta), 1) + ' gon');
+    c.push('Radius Vorderachse min. <b>' + f(lim.rFront, 1) + ' m</b>');
+    c.push('Weg <b>' + f(A.length, 1) + ' m</b>');
+    if (veh.artic) c.push('Knick max. <b>' + f(gon(A.maxPhi), 1) + '</b> / ' + f(veh.knickGon, 0) + ' gon');
+    if (P && P.lastArc) {
+      c.push('Bogen R = <b>' + f(P.lastArc.R, 1) + ' m</b> · ' + f(Math.abs(gon(P.lastArc.delta)), 1) + ' gon');
+      if (Math.abs(gon(P.lastArc.delta)) >= 150) c.push('Querversatz 2R = <b>' + f(2 * P.lastArc.R, 2) + ' m</b> (Platzbedarf etwa ⌀ ' + f(2 * veh.rOuter, 2) + ' m)');
+    }
+    if (A.satLen > 0.01) c.push('<span class="w">⚠ Anschlag ' + f(A.satLen, 1) + ' m</span>');
+    return c.map((x) => '<span>' + x + '</span>').join('');
+  }
+
+  /* Show the state of the guide: the steps, the progress, the question of the step, the numbers and the buttons. */
+  function updateGuide() {
+    const cur = S.step, dots = $('dots').children;
+    for (let n = 1; n <= 6; n++) {
+      const el = $('step' + n), kind = n === cur ? 'active' : stepDone(n) ? 'done' : 'todo';
+      el.classList.toggle('active', kind === 'active'); el.classList.toggle('done', kind === 'done'); el.classList.toggle('todo', kind === 'todo');
+      setText(el.querySelector('.num'), kind === 'done' ? '✓' : n === 6 ? '·' : String(n));
+      setText(el.querySelector('.ttl span'), stepSummary(n));
+      dots[n - 1].className = (kind === 'active' ? 'cur ' : kind === 'done' ? 'done ' : '') + (n === 6 ? 'opt' : '');
+    }
+    const body = $('step' + cur), g = gateOf(cur), pr = promptFor(cur), what = body.querySelector('.what');
+    what.className = 'what' + (pr.kind === 'warn' ? ' warn' : pr.kind === 'ok' ? ' ok' : '');
+    setText(what.querySelector('b'), pr.title); setText(what.querySelector('small'), pr.text);
+    const need = body.querySelector('.need'), work = body.querySelector('.work');
+    if (need) { need.hidden = !g; if (g) { const b = need.querySelector('button'); b.dataset.go = g.go; setText(b, g.btn); } }
+    if (work) work.hidden = !!g;
+    body.querySelectorAll('[data-need]').forEach((b) => {
+      const k = b.dataset.need;
+      b.disabled = k === 'plan' ? !S.hasPage : k === 'scale' ? !(S.mpp && S.scaleDone) : !stepDone(4);
+    });
+    // The plan: the question as a short text, the numbers, the box for the length, the buttons.
+    const cue = $('cue'), text = S.hasPage ? pr.cue : '';
+    cue.hidden = !text; setText(cue, text); cue.classList.toggle('warn', pr.kind === 'warn');
+    const st = statusHtml(); $('status').hidden = !st; setHtml($('status'), st);
+    $('scalebox').hidden = !(cur === 2 && S.scalePts.length === 2 && !S.scaleDone);
+    $('tools').hidden = !S.hasPage;
+    $('undoBtn').disabled = !(S.tool === 'drive' ? S.pend || S.start : S.tool === 'scale' && !S.scaleDone && S.scalePts.length);
+    document.querySelectorAll('[data-seg]').forEach((b) => b.classList.toggle('on', b.dataset.seg === S.seg));
+    setText($('segHelp'), SEG_HELP[S.seg]);
+    $('turnRow').hidden = S.seg !== 'turn';
+    ['png', 'dxf', 'svg', 'play'].forEach((id) => { $(id).disabled = !(S.res && S.start && S.wps.length); });
+  }
+
+  /* Go to a step. The tool of the plan follows the step: step 2 measures, step 4 draws, the other steps only move the view. */
+  function goStep(n) {
+    n = Math.max(1, Math.min(6, n));
+    if (S.step === 2 && n !== 2 && !S.scaleDone && S.scalePts.length) cancelScale();      // A measure that is not confirmed does not stay.
+    if (S.step === 3 && n > 3) S.vehSeen = true;       // The user passed the vehicle step.
+    if (n >= 4 && !gateOf(4)) S.vehSeen = true;
+    if (S.playing) { S.playing = false; $('play').innerHTML = PLAY_HTML; }
+    S.step = n; S.note = null;
+    setTool(n === 2 ? 'scale' : n === 4 ? 'drive' : 'view');
   }
 
   function sampleIndex() {
@@ -339,8 +496,17 @@
   }
 
   /* ---------- drawing ---------- */
+  /* The box for the length of the scale is at the middle of the measured line. */
+  function positionScaleBox() {
+    const box = $('scalebox');
+    if (box.hidden || S.scalePts.length < 2) return;
+    const a = p2s(S.scalePts[0]), b = p2s(S.scalePts[1]);
+    box.style.left = (a.x + b.x) / 2 + 'px'; box.style.top = (a.y + b.y) / 2 + 'px';
+  }
+
   function draw() {
     dirty = false;
+    positionScaleBox();
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#8a8f98';
@@ -441,10 +607,24 @@
     if ($('oSweep').checked) { ctx.fillStyle = ok ? (P ? 'rgba(22,163,74,.20)' : 'rgba(40,110,220,.22)') : 'rgba(217,70,20,.25)'; ctx.fill(A.sweep); }
     ctx.lineWidth = um; ctx.strokeStyle = ok ? (P ? 'rgba(21,128,61,.9)' : 'rgba(20,70,170,.9)') : 'rgba(194,65,12,.9)'; ctx.stroke(A.trails);
     if ($('oSil').checked) { ctx.strokeStyle = 'rgba(30,40,60,.5)'; ctx.stroke(A.sil); }
-    ctx.strokeStyle = '#6b7280'; ctx.setLineDash([4 * um, 3 * um]); ctx.stroke(A.rear);
+    if ($('oRear').checked) { ctx.strokeStyle = '#6b7280'; ctx.setLineDash([4 * um, 3 * um]); ctx.stroke(A.rear); }
     ctx.strokeStyle = ok ? '#111' : '#c2410c'; ctx.lineWidth = 1.5 * um; ctx.setLineDash([]); ctx.stroke(A.front);
     ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 4 * um; ctx.stroke(A.sat);   // The steering is at the stop.
     drawVehicle(P ? P.end : R.smp[sampleIndex()], um, P ? 0.75 : 1);
+    if ($('oIcr').checked && S.step >= 4) drawIcr(P ? P.end : R.smp[sampleIndex()], um);
+    ctx.restore();
+  }
+
+  /* Debug: the center of rotation (ICR) of the front body. It is on the line of the model rear axle, at the distance wb / tan(d). */
+  function drawIcr(q, um) {
+    if (Math.abs(q.d) < 1e-3) return;
+    const rr = Sim.modelGeom(veh).wb / Math.tan(q.d), cx = q.Rx - rr * Math.sin(q.th), cy = q.Ry + rr * Math.cos(q.th);
+    ctx.save();
+    ctx.strokeStyle = '#d92d20'; ctx.fillStyle = '#d92d20'; ctx.lineWidth = um; ctx.setLineDash([5 * um, 4 * um]);
+    ctx.beginPath(); ctx.moveTo(q.Rx, q.Ry); ctx.lineTo(cx, cy); ctx.moveTo(q.Fx, q.Fy); ctx.lineTo(cx, cy); ctx.stroke();
+    ctx.setLineDash([]); ctx.lineWidth = 2 * um;
+    ctx.beginPath(); ctx.moveTo(cx - 8 * um, cy); ctx.lineTo(cx + 8 * um, cy); ctx.moveTo(cx, cy - 8 * um); ctx.lineTo(cx, cy + 8 * um); ctx.stroke();
+    ctx.font = 12 * um + 'px system-ui,sans-serif'; ctx.fillText('Momentanpol', cx + 10 * um, cy - 8 * um);
     ctx.restore();
   }
 
@@ -593,6 +773,7 @@
 
   /* Draw the steering wheel display in the corner (screen units). */
   function drawHud() {
+    if (S.step < 4 || !$('oHud').checked) return;
     const q = S.prev ? S.prev.end : S.res ? S.res.smp[sampleIndex()] : null;
     if (!q || !S.res) return;
     const dpr = window.devicePixelRatio || 1, w = cv.width / dpr;
@@ -622,16 +803,9 @@
   }
 
   /* ---------- tools and input ---------- */
-  const HINTS = {
-    scale: 'Maßstab: Zwei Punkte auf eine Strecke mit bekannter Länge klicken (Bemaßung, Fahrbahnbreite). Danach die Länge in m eingeben. Plan verschieben: mit der linken Maustaste ziehen. Zoom: Mausrad. Esc bricht ab.',
-    drive: 'Fahrweise 1. Die Leitlinie ist der Weg der Mitte der Vorderachse, nicht der Karosserie. 1. Klick = Start der Vorderachsmitte, 2. Klick = erste Gerade und Fahrtrichtung. Drei Arten von Abschnitten: Gerade/Ecke (G): An jedem Eckpunkt zwischen zwei Geraden entsteht ein tangentialer Bogen, je weiter die Punkte auseinander liegen, desto größer. Bogen durch Punkt (B): ein Kreisbogen vom Fahrzeugende durch den Punkt an der Maus. Kurve nach Winkel (K): ein Bogen mit der Richtungsänderung in gon (RBSV-Schablone, 200 gon = Wende in einem Zug). Die Maus links oder rechts vom Fahrzeug wählt die Drehrichtung, der Klick setzt die Kurve. Taste W = Wende mit 200 gon (der Querversatz 2R ist nur der Versatz der Leitlinie, der Platzbedarf ist etwa der Wendekreisdurchmesser des Fahrzeugs). Der Radius bleibt immer über dem Wendekreis. Ist etwas nicht fahrbar, wird es begrenzt (orange). Esc = Fahrlinie beenden.',
-    view: 'Ansicht: Die Fahrlinie ist beendet. F = Fahrlinie weiter bearbeiten, M = Maßstab. Plan verschieben: ziehen.'
-  };
-
+  /* The tool of the plan: 'scale' measures, 'drive' draws the guide line, 'view' only moves the view. The step sets it (see goStep). */
   function setTool(t) {
     S.tool = t;
-    document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === t));
-    $('hint').textContent = HINTS[t]; delete $('hint').dataset.err;
     cv.style.cursor = t === 'view' ? 'default' : 'crosshair';
     if (t !== 'drive') { S.mouse = null; S.pend = null; }
     updatePreview();
@@ -639,9 +813,8 @@
 
   /* Set the type of the next part: 'line' (straight line, corner), 'arc' (arc through the point) or 'turn' (turn by angle). */
   function setSeg(t) {
-    S.seg = t;
-    document.querySelectorAll('[data-seg]').forEach((b) => b.classList.toggle('active', b.dataset.seg === t));
-    if (S.tool !== 'drive') setTool('drive'); else updatePreview();
+    S.seg = t; S.note = null;
+    if (S.step !== 4) goStep(4); else updatePreview();
   }
 
   /* Find the point under the mouse. Return -2 for the start point and -1 if there is no point. */
@@ -677,13 +850,14 @@
     const second = now - lastClick.t < 350 && Math.hypot(sp.x - lastClick.x, sp.y - lastClick.y) < 5;
     lastClick = { t: now, x: sp.x, y: sp.y };
     if (second) return;
+    S.note = null;
     if (S.tool === 'scale') {
-      if (S.scaleDone) { S.scalePts = []; S.scaleDone = false; S.mpp = null; recompute(); }
+      if (S.scaleDone || S.scalePts.length >= 2) startMeasure();      // The user measures again. The old scale stays until the new one is confirmed.
       S.scalePts.push(p);
-      requestDraw();
+      updateInfo(); requestDraw();
       if (S.scalePts.length === 2) finishScale();     // Two points are enough.
     } else if (S.tool === 'drive') {
-      if (!S.mpp) { $('hint').textContent = 'Zuerst den Maßstab setzen.'; return; }
+      if (!S.mpp) { note('Zuerst den Maßstab setzen.'); return; }
       if (!S.start) {
         if (!S.pend) S.pend = p;
         else if (Math.hypot(p.x - S.pend.x, p.y - S.pend.y) * S.zoom > 3) {
@@ -697,8 +871,7 @@
         S.wps.push(S.prev.target); S.pos = 1; $('pos').value = 1000; recompute();
         if (isTurn) setSeg('line');       // After a turn, the vehicle drives straight on.
       } else {
-        $('hint').textContent = S.prev ? failText(S.prev.fail) : 'Zuerst die ungültigen Punkte entfernen (Rückschritt).';
-        $('hint').dataset.err = '1';
+        note(S.prev ? failText(S.prev.fail) : 'Zuerst die ungültigen Punkte entfernen (Rückschritt).');
       }
     }
     requestDraw();
@@ -742,9 +915,8 @@
     if (d && d.type === 'maybe') clickAt({ x: d.sx, y: d.sy }, d.p, d.button);
     if (d && (d.type === 'wp' || d.type === 'start') && d.okBefore && !routeOk()) {
       if (d.type === 'wp') S.wps[d.i] = d.orig; else S.start.p = d.orig;
-      $('hint').textContent = 'Dieser Punkt ist dort nicht möglich: Die Strecken wären zu kurz für die Kurven. Der Punkt ist zurückgesprungen.';
-      $('hint').dataset.err = '1';
       recompute();
+      note('Dieser Punkt ist dort nicht möglich: Die Strecken wären zu kurz für die Kurven. Der Punkt ist zurückgesprungen.');
     }
     updatePreview();
   });
@@ -758,29 +930,30 @@
     requestDraw();
   }, { passive: false });
 
-  /* Keys. The space key (hold) moves the plan. The list in the sidebar shows the other keys. */
+  /* Show or hide the list of the keys. */
+  function showKeys(on) { $('keys').hidden = !on; }
+
+  /* Keys. Every key has a button too. The space key (hold) moves the plan. The key ? shows the list. */
   window.addEventListener('keydown', (e) => {
     if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
     if (e.code === 'Space') { spaceDown = true; if (e.target === document.body) e.preventDefault(); return; }
     const k = e.key.toLowerCase();
     if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); undoPoint(); return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    if (k === 'escape' || k === 'enter') {
-      // First, remove the unfinished work. Then end the tool.
-      if (S.tool === 'drive' && S.pend) S.pend = null;
-      else if (S.tool === 'scale' && !S.scaleDone && S.scalePts.length) S.scalePts = [];
-      else if (S.tool !== 'view') setTool('view');
-      requestDraw();
+    if (k === '?') showKeys($('keys').hidden);
+    else if (k === 'escape') {
+      // Esc only stops an input that is not finished. It never changes the step.
+      if (!$('keys').hidden) showKeys(false);
+      else if (S.tool === 'drive' && S.pend) S.pend = null;
+      else if (S.tool === 'scale' && !S.scaleDone && S.scalePts.length) cancelScale();
+      else if (S.note) S.note = null;
+      updateInfo(); requestDraw();
     } else if (k === 'backspace' || k === 'delete') { e.preventDefault(); undoPoint(); }
-    else if (k === 'f') setTool('drive');
     else if (k === 'g') setSeg('line');
     else if (k === 'b') setSeg('arc');
     else if (k === 'k') setSeg('turn');
-    else if (k === '[') selectRoute(S.ri - 1);
-    else if (k === ']') selectRoute(S.ri + 1);
     else if (k === 'w') { $('turnGon').value = 200; S.turnGon = 200; setSeg('turn'); }      // A turn around: 200 gon.
-    else if (k === 'm') setTool('scale');
-    else if (k === 'p') $('play').click();
+    else if (k === 'p') { if (S.step !== 5) goStep(5); $('play').click(); }
     else if (k === '0' || k === 'home') fitView();
     else if (k === '+' || k === '=') zoomBy(1.25);
     else if (k === '-') zoomBy(0.8);
@@ -788,11 +961,13 @@
   });
   window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; });
 
-  /* Remove the last point. */
+  /* Remove the last point of the unfinished input: a point of the scale, the start point or the last point of the guide line. */
   function undoPoint() {
-    if (S.tool === 'scale' && !S.scaleDone) { S.scalePts.pop(); requestDraw(); }
-    else if (S.pend) { S.pend = null; requestDraw(); }
-    else if (S.start) removeWp();
+    if (S.tool === 'scale') { if (!S.scaleDone && S.scalePts.length) { S.scalePts.pop(); updateInfo(); requestDraw(); } }
+    else if (S.tool === 'drive') {
+      if (S.pend) { S.pend = null; updateInfo(); requestDraw(); }
+      else if (S.start) removeWp();
+    }
   }
 
   function zoomBy(factor) {
@@ -806,8 +981,27 @@
   document.addEventListener('click', (e) => { if (e.target.tagName === 'BUTTON') e.target.blur(); });
 
   /* ---------- controls ---------- */
-  document.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
   document.querySelectorAll('[data-seg]').forEach((b) => b.addEventListener('click', () => setSeg(b.dataset.seg)));
+  $('wende').addEventListener('click', () => { $('turnGon').value = 200; S.turnGon = 200; setSeg('turn'); });
+
+  // The steps: a click on a header, on the progress bar or on a button with data-go goes to the step.
+  document.addEventListener('click', (e) => {
+    const h = e.target.closest('.step > header'), b = e.target.closest('[data-go]');
+    if (h) goStep(+h.parentNode.id.slice(4));
+    else if (b && !b.disabled) goStep(+b.dataset.go);
+  });
+  for (let n = 1; n <= 6; n++) { const i = document.createElement('i'); i.dataset.go = n; i.title = $('step' + n).querySelector('b').textContent; $('dots').appendChild(i); }
+  $('helpBtn').addEventListener('click', () => showKeys($('keys').hidden));
+  $('keysClose').addEventListener('click', () => showKeys(false));
+  $('zIn').addEventListener('click', () => zoomBy(1.25));
+  $('zOut').addEventListener('click', () => zoomBy(0.8));
+  $('undoBtn').addEventListener('click', undoPoint);
+  $('scaleOk').addEventListener('click', confirmScale);
+  $('scaleCancel').addEventListener('click', cancelScale);
+  $('scaleLen').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); confirmScale(); } else if (e.key === 'Escape') { e.preventDefault(); cancelScale(); }
+  });
+  $('moreRoute').addEventListener('click', addRoute);
 
   // The fields of the turn: the change of direction in gon, and the radius.
   function readTurnFields() {
@@ -826,35 +1020,50 @@
     const n = Math.min(pdfDoc.numPages, Math.max(1, parseInt($('pageNo').value, 10) || 1));
     $('pageNo').value = n; renderPage(n);
   });
-  $('scaleReset').addEventListener('click', () => {
-    S.mpp = null; S.scalePts = []; S.scaleDone = false; setTool('scale'); recompute();
-  });
+  $('scaleReset').addEventListener('click', () => { startMeasure(); goStep(2); });
   $('driveReset').addEventListener('click', () => { S.start = null; S.pend = null; S.wps = []; recompute(); });
   $('driveUndo').addEventListener('click', () => { if (S.start) removeWp(); });
   $('fit').addEventListener('click', fitView);
-  ['oSweep', 'oSil', 'oClear'].forEach((id) => $(id).addEventListener('change', requestDraw));
+  ['oSweep', 'oSil', 'oClear', 'oIcr', 'oRear', 'oHud'].forEach((id) => $(id).addEventListener('change', requestDraw));
   $('clearM').addEventListener('input', requestDraw);
   $('silStep').addEventListener('change', recompute);
 
   /* ---------- vehicle list ---------- */
+  // A small top view of the vehicle for its card. The length of the drawing follows the length of the vehicle.
+  function vehSvg(v) {
+    const L = Math.max(30, Math.min(120, (v.front + v.wb + v.rear) * 6.4)), x = (120 - L) / 2, W = 16;
+    const body = v.artic ? '<rect x="' + x + '" y="9" width="' + L * 0.52 + '" height="' + W + '" rx="2"/><rect x="' + (x + L * 0.54) + '" y="9" width="' + L * 0.46 + '" height="' + W + '" rx="2"/>'
+      : '<rect x="' + x + '" y="9" width="' + L + '" height="' + W + '" rx="2"/>';
+    const wheels = [0.2, 0.85].map((u) => '<circle cx="' + (x + L * u) + '" cy="9" r="2.2"/><circle cx="' + (x + L * u) + '" cy="25" r="2.2"/>').join('');
+    return '<svg viewBox="0 0 120 34"><g fill="#fff" stroke="#667085" stroke-width="1.6">' + body + '</g><g fill="#222">' + wheels + '</g></svg>';
+  }
+
   function renderVehicles() {
     const box = $('vehList');
     box.innerHTML = '';
-    vehicles.forEach((v, i) => {
-      const b = document.createElement('button');
-      b.className = 'chip' + (i === selIdx ? ' active' : '');
-      b.textContent = (i < 9 ? (i + 1) + ' · ' : '') + v.name;
+    const heading = (t) => { const h = document.createElement('div'); h.className = 'grp'; h.style.gridColumn = '1 / -1'; h.style.margin = '8px 0 0'; h.textContent = t; box.appendChild(h); };
+    const card = (v, i) => {
+      const b = document.createElement('button'), name = document.createElement('b'), dim = document.createElement('span');
+      b.className = 'card' + (i === selIdx ? ' sel' : '');
       b.title = 'Fahrzeug wählen' + (i < 9 ? ' (Taste ' + (i + 1) + ')' : '');
+      name.textContent = v.name; dim.className = 'd'; dim.textContent = f(v.front + v.wb + v.rear, 2) + ' × ' + f(v.width, 2) + ' m';
+      b.innerHTML = (i < 9 ? '<span class="key">' + (i + 1) + '</span>' : '') + (v.preset && v.placeholder ? '<span class="badge" title="Die Maße sind Platzhalter, keine RBSV-Werte">Platzhalter</span>' : '') + vehSvg(v);
+      b.appendChild(name); b.appendChild(dim);
       b.addEventListener('click', () => selectVehicle(i));
       box.appendChild(b);
-    });
+    };
+    heading('Voreinstellungen');
+    vehicles.forEach((v, i) => { if (v.preset) card(v, i); });
+    heading('Eigene Fahrzeuge');
+    vehicles.forEach((v, i) => { if (!v.preset) card(v, i); });
     const add = document.createElement('button');
-    add.className = 'chip'; add.textContent = '+'; add.title = 'Neues Fahrzeug anlegen (Kopie des gewählten)';
+    add.className = 'card add'; add.textContent = '＋ Kopie des gewählten Fahrzeugs'; add.title = 'Neues Fahrzeug anlegen (Kopie des gewählten)';
     add.addEventListener('click', addVehicle);
     box.appendChild(add);
     $('vehDel').style.display = veh.preset ? 'none' : '';
     $('vehReset').style.display = veh.preset ? '' : 'none';
     $('presetNote').textContent = presetNote; $('presetNote').style.display = presetNote ? '' : 'none';
+    updateGuide();
   }
 
   // The kind of a vehicle: 'rigid', 'bus' (articulated bus) or 'semi' (semitrailer).
@@ -949,9 +1158,9 @@
     box.innerHTML = '';
     S.routes.forEach((r, i) => {
       const b = document.createElement('button');
-      b.className = 'chip' + (i === S.ri ? ' active' : '');
+      b.className = 'chip' + (i === S.ri ? ' on' : '');
       b.textContent = r.name + ' · ' + r.veh.name;
-      b.title = 'Fahrkurve wählen (Tasten [ und ])';
+      b.title = 'Fahrkurve wählen';
       const col = ROUTE_COLORS[i % ROUTE_COLORS.length];
       if (col && i !== S.ri) b.style.borderLeft = '5px solid ' + col;
       b.addEventListener('click', () => selectRoute(i));
@@ -962,6 +1171,7 @@
     add.addEventListener('click', addRoute);
     box.appendChild(add);
     $('routeDel').style.display = S.routes.length > 1 ? '' : 'none';
+    updateGuide();
     if ($('r_name').value !== S.routes[S.ri].name) $('r_name').value = S.routes[S.ri].name;      // Do not move the cursor while the user types.
   }
 
@@ -988,7 +1198,7 @@
     saveRoute();
     S.routes.push(newRoute(name.trim()));
     selectRoute(S.routes.length - 1);
-    if (S.tool !== 'drive') setTool('drive');
+    goStep(4);
   }
 
   $('routeDel').addEventListener('click', () => {
@@ -1013,15 +1223,16 @@
     const dt = Math.min(0.1, (t - lastT) / 1000); lastT = t;
     if (S.res) {
       S.pos += 3 * dt / S.res.length;
-      if (S.pos >= 1) { S.pos = 1; S.playing = false; $('play').textContent = '▶ Abspielen'; }
+      if (S.pos >= 1) { S.pos = 1; S.playing = false; $('play').innerHTML = PLAY_HTML; }
       $('pos').value = Math.round(S.pos * 1000);
       updateInfo(); requestDraw();
     }
     requestAnimationFrame(tick);
   }
   $('play').addEventListener('click', () => {
+    if (!S.res) return;
     S.playing = !S.playing;
-    $('play').textContent = S.playing ? '❚❚ Pause' : '▶ Abspielen';
+    $('play').innerHTML = S.playing ? PAUSE_HTML : PLAY_HTML;
     if (S.playing) { if (S.pos >= 1) S.pos = 0; lastT = performance.now(); requestAnimationFrame(tick); }
   });
 
@@ -1035,6 +1246,7 @@
   $('png').addEventListener('click', () => {
     draw();
     cv.toBlob((b) => download(b, 'schleppkurve.png'));
+    S.exported = true; updateGuide();
   });
 
   /* ---------- vector export (DXF, SVG) ---------- */
@@ -1094,20 +1306,27 @@
 
   function exportVector(ext) {
     if (!S.res || !S.mpp || !S.start || !S.res.smp.length) {
-      $('hint').textContent = 'Für den Export zuerst Maßstab und eine Fahrlinie setzen.'; $('hint').dataset.err = '1';
+      note('Für den Export zuerst Maßstab und eine Fahrlinie setzen.');
       return;
     }
     const model = exportModel();
     const text = ext === 'dxf' ? Export.dxf(model) : Export.svg(model);
     download(new Blob([text], { type: ext === 'dxf' ? 'application/dxf' : 'image/svg+xml' }), fileName(ext));
+    S.exported = true; updateGuide();
   }
   $('dxf').addEventListener('click', () => exportVector('dxf'));
   $('svg').addEventListener('click', () => exportVector('svg'));
 
+  // The test takes about 10 s and blocks the page. The text "läuft" is shown first.
   $('selftest').addEventListener('click', () => {
-    $('tests').innerHTML = Sim.selfTest().map((r) =>
-      '<div class="' + (r.ok ? 'good' : 'bad') + '">' + (r.ok ? '✔ ' : '✘ ') + r.name +
-      (r.detail ? ' <span class="mute">(' + r.detail + ')</span>' : '') + '</div>').join('');
+    $('selftest').disabled = true; setText($('testInfo'), 'läuft, bitte warten …'); $('tests').innerHTML = '';
+    setTimeout(() => {
+      const res = Sim.selfTest(), bad = res.filter((r) => !r.ok).length;
+      setHtml($('tests'), res.map((r) => '<div class="' + (r.ok ? 'good' : 'bad') + '">' + (r.ok ? '✔ ' : '✘ ') + r.name +
+        (r.detail ? ' <span class="mute">(' + r.detail + ')</span>' : '') + '</div>').join(''));
+      setText($('testInfo'), bad ? bad + ' von ' + res.length + ' Tests fehlgeschlagen' : 'alle ' + res.length + ' Tests bestanden');
+      $('selftest').disabled = false;
+    }, 40);
   });
 
   // Drag a PDF file onto the page and drop it.
@@ -1121,8 +1340,7 @@
   });
 
   window.addEventListener('resize', resize);
-  window.Turn = { S: S, get veh() { return veh; }, vehicles: vehicles, selectVehicle: selectVehicle, selectRoute: selectRoute, addRoute: addRoute, setSeg: setSeg, recompute: recompute, finishScale: finishScale, setTool: setTool, updatePreview: updatePreview };
+  window.Turn = { S: S, get veh() { return veh; }, vehicles: vehicles, selectVehicle: selectVehicle, selectRoute: selectRoute, addRoute: addRoute, setSeg: setSeg, recompute: recompute, finishScale: finishScale, setTool: setTool, updatePreview: updatePreview, goStep: goStep };
   refreshFields(); renderVehicles(); renderRoutes();
-  document.querySelectorAll('[data-seg]').forEach((b) => b.classList.toggle('active', b.dataset.seg === S.seg));
-  resize(); setTool('scale'); updateInfo();
+  resize(); goStep(1);
 })();

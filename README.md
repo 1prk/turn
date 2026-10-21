@@ -3,20 +3,36 @@
 Browserbasierte Prüfung von Schleppkurven auf einem PDF-Lageplan. Kein Server, kein Build:
 `index.html` per Doppelklick öffnen (`file://` genügt).
 
-## Ablauf
-1. **PDF laden** (Datei wählen oder per Drag & Drop) oder „Leere Fläche (Test)“.
-2. **Maßstab**: zwei Punkte auf eine bekannte Strecke klicken, Länge in m eingeben. Das Bild lässt sich jederzeit
-   mit der linken Maustaste ziehen (ein Klick ohne Bewegung setzt einen Punkt), Zoom per Mausrad.
-3. **Fahrweise 1** (Leitlinie): Eckpunkte der Leitlinie der Vorderachsmitte klicken. 1. Klick = Start, 2. Klick = erste
-   Gerade (gibt die Fahrtrichtung vor). An jedem Eckpunkt entsteht automatisch ein Kreisbogen, der tangential an die
-   Geraden anschließt. Die **Live-Vorschau** zeigt das Fahrzeug immer an der Maus. Ist der Punkt an der Maus mit dem
-   Lenkeinschlag nicht fahrbar, wird er auf die größtmögliche Kurve **begrenzt** (orange): So sieht man, wie weit das
-   Fahrzeug kommt. Ein Klick setzt den begrenzten Punkt. Unfahrbare Fahrlinien sind nicht möglich. Punkte sind ziehbar
-   (Rechtsklick löscht, Rückschritt nimmt den letzten zurück). Ein Ziehen, das die Linie unfahrbar machen würde,
-   springt zurück. Wird eine bestehende Linie durch einen Fahrzeugwechsel unfahrbar, wird nur der fahrbare Teil
-   gezeichnet, die übrigen Punkte sind rot markiert.
-4. Ergebnis: Hüllfläche, Hüllkurven, Silhouetten, Lenkrad-Anzeige, auf Wunsch der Bewegungsspielraum. Fahrzeug per
-   Regler oder „Abspielen“ bewegen.
+## Ablauf (geführte Seitenleiste)
+Die Seitenleiste führt in **sechs Schritten** durch die Arbeit. Oben zeigt ein Fortschrittsbalken, wo man steht. Nur der
+aktuelle Schritt ist aufgeklappt, die fertigen Schritte stehen als eine Zeile mit Haken und Zusammenfassung da
+(„Maßstab: 1 m = 20,00 pt · ca. 1:142“). Ein Klick auf einen Schritt (oder den Balken) öffnet ihn wieder. Jeder Schritt
+beginnt mit einem Kasten **„Was jetzt?“**, der dem Zustand folgt. Dasselbe steht kurz als Hinweis oben im Plan. Fehlt eine
+Voraussetzung, sagt der Schritt, was fehlt, und bietet einen Button dorthin an. Gesperrt ist nichts.
+
+1. **Lageplan:** PDF laden (Datei wählen oder in das Fenster ziehen) oder „Ohne Plan testen (leere Fläche)“.
+2. **Maßstab:** zwei Punkte auf eine bekannte Strecke klicken (Bemaßung, Fahrbahnbreite). Die **Länge** wird direkt an der
+   Strecke im Plan eingetragen (Enter bestätigt, Esc verwirft). Dann geht es von selbst zum Fahrzeug. „Neu messen“ behält den
+   alten Maßstab, bis der neue bestätigt ist.
+3. **Fahrzeug:** Karten mit Draufsicht, Maßen und Platzhalter-Hinweis. Ein Klick wählt das Fahrzeug der gewählten Fahrkurve.
+   Die Kennwerte stehen darunter. „Fahrzeug bearbeiten…“ klappt die Maße auf (ein eigener Editor folgt später).
+4. **Fahrlinie** (Fahrweise 1): Der 1. Klick ist der Start der Vorderachsmitte, der 2. Klick die erste Gerade (sie gibt die
+   Fahrtrichtung vor). Danach die Abschnittsart mit den drei großen Buttons wählen (Gerade/Ecke, Bogen durch Punkt, Kurve
+   nach Winkel, dazu „Wende in einem Zug“). An jedem Eckpunkt entsteht ein tangentialer Kreisbogen. Die **Live-Vorschau**
+   zeigt das Fahrzeug immer an der Maus. Ist der Punkt an der Maus mit dem Lenkeinschlag nicht fahrbar, wird er auf die
+   größtmögliche Kurve **begrenzt** (orange): So sieht man, wie weit das Fahrzeug kommt. Ein Klick setzt den begrenzten
+   Punkt. Punkte sind ziehbar (Rechtsklick löscht). Ein Ziehen, das die Linie unfahrbar machen würde, springt zurück. Wird
+   eine bestehende Linie durch einen Fahrzeugwechsel unfahrbar, wird nur der fahrbare Teil gezeichnet, die übrigen Punkte
+   sind rot markiert. Mehrere Fahrkurven: Reiter oben im Schritt, **+** legt eine neue an. Unten im Plan stehen die
+   Kennzahlen der Vorschau (Lenkwinkel, Radius, Weg, Anschlag). „Fahrlinie fertig“ führt zur Wiedergabe.
+5. **Wiedergabe & Export:** Abspielen und Regler, Anzeige (Hüllfläche, Silhouetten, Bewegungsspielraum), Ergebnis, Export
+   (PNG, DXF, SVG) und „weitere Fahrkurve anlegen“.
+6. **Debug (optional):** Selbsttest („Kinematik prüfen“, dauert etwa 10 s), Hilfslinien (Momentanpol, Spur der Hinterachse,
+   Lenkrad-Anzeige) und die Werte an der Position des Fahrzeugs.
+
+Das Werkzeug im Plan folgt dem Schritt: In Schritt 2 misst es, in Schritt 4 zeichnet es, sonst verschiebt man nur die
+Ansicht (Ziehen mit der linken Maustaste, ein Klick ohne Bewegung setzt einen Punkt; Zoom per Mausrad). Links oben im
+Plan stehen Zoom, Einpassen und „Letzten Punkt zurück“ als Buttons.
 
 **Alle Winkel in der Oberfläche sind in gon** (400 gon = Vollkreis, 100 gon = rechter Winkel): Lenkwinkel, Limit,
 Lenkrad, Drehung der Bögen, Richtungsänderung.
@@ -44,24 +60,28 @@ PKW 5,85 m, LKW 9,45 m bei 9,46 m). Der Platzbedarf ist deshalb etwa der Wendekr
 Leitlinie 2R.
 
 ## Tastenkürzel
+Jede Funktion hat einen Button. Die Tasten sind nur Abkürzungen (sie stehen klein auf den Buttons). Die Taste `?` oder der
+Link oben in der Seitenleiste zeigt die Übersicht im Plan.
+
 | Taste | Funktion |
 |---|---|
-| `F` | Fahrlinie bearbeiten |
-| `G` / `B` / `K` | Abschnitt: Gerade/Ecke, Bogen durch Punkt oder Kurve nach Winkel |
+| `G` / `B` / `K` | Abschnitt: Gerade/Ecke, Bogen durch Punkt oder Kurve nach Winkel (öffnet Schritt 4) |
 | `W` | Wende in einem Zug (Kurve mit 200 gon) |
-| `Esc` / `Enter` | Fahrlinie beenden (zuerst wird Unfertiges verworfen) |
-| `M` | Maßstab setzen |
-| `⌫` / `Entf` / `Strg+Z` | letzten Punkt zurück |
+| `⌫` / `Entf` / `Strg+Z` | letzten Punkt zurück (nur im Messen und im Zeichnen, nie in der Wiedergabe) |
+| `Esc` | laufende Eingabe abbrechen (Punkte der Messung, Startpunkt, Hinweis, Übersicht). Wechselt nie den Schritt. |
 | `1`–`9` | Fahrzeug wählen (für die gewählte Fahrkurve) |
-| `[` / `]` | Fahrkurve wechseln |
-| `P` | Abspielen / Pause |
+| `P` | Abspielen / Pause (öffnet Schritt 5) |
 | `0` / `Pos1` | Ansicht einpassen |
 | `+` / `-` | Zoom |
 | `Leertaste` (halten) | Plan verschieben |
+| `?` | Übersicht der Tasten |
+
+Entfallen sind `F` und `M` (das Werkzeug folgt dem Schritt), `[` und `]` (die Fahrkurven sind Reiter in Schritt 4) und
+`Enter`/`Esc` als „Fahrlinie beenden“ (dafür gibt es „Fahrlinie fertig“).
 
 ## Fahrzeuge
-Oben in Abschnitt 3 stehen die Fahrzeuge als Reiter. Mit **+** entsteht eine Kopie des gewählten Fahrzeugs unter neuem
-Namen. Eigene Fahrzeuge lassen sich löschen. Alle Fahrzeuge und Änderungen bleiben im Browser (localStorage) erhalten.
+In Schritt 3 stehen die Fahrzeuge als Karten (Voreinstellungen und eigene Fahrzeuge). Die Karte „Kopie des gewählten
+Fahrzeugs“ legt ein eigenes Fahrzeug unter neuem Namen an. Eigene Fahrzeuge lassen sich löschen („Fahrzeug bearbeiten…“). Alle Fahrzeuge und Änderungen bleiben im Browser (localStorage) erhalten.
 Voreinstellungen (Maße in m, Überhang hinten und Radstand beziehen sich bei mehreren Hinterachsen auf deren **Mitte**):
 
 | Fahrzeug | Länge | Radstand | Überhang vorn | Überhang hinten | Breite | Wendekreis außen | max. Lenkwinkel |
@@ -106,13 +126,13 @@ Ecken der vorderen und den hinteren Ecken der hinteren Karosserie.
   63,0 gon (56,7°). Ein Grenzwert von 45° wäre dafür zu klein. Bitte den echten Wert eintragen.
 - Eine Fahrkurve, die den Grenzwert überschreitet, ist nicht möglich: Die Vorschau wird begrenzt, bestehende Punkte
   werden bei zu kleinem Grenzwert als ungültig markiert.
-- Die Wende in einem Zug (Taste W) hat beim Gelenkbus einen Querversatz der Leitlinie von 2 · R = 17,13 m. Der Platzbedarf
+- Die Wende in einem Zug (Taste W oder Button) hat beim Gelenkbus einen Querversatz der Leitlinie von 2 · R = 17,13 m. Der Platzbedarf
   ist etwa der Wendekreisdurchmesser 22,80 m (siehe „Leitlinie, Querversatz und Platzbedarf“).
 - Eigene Gelenkfahrzeuge: Fahrzeug kopieren (+), Haken „Gelenkfahrzeug“, Maße eintragen.
 
 ## Bewegungsspielraum
 Die Schablonen der RBSV zeigen einen Bewegungsspielraum von 0,50 m um die überstrichene Fläche. Der Haken
-**Bewegungsspielraum** in Abschnitt 5 zeigt ihn als helles Band um die Hüllfläche der gewählten Fahrkurve. Das Feld
+**Bewegungsspielraum** in Schritt 5 zeigt ihn als helles Band um die Hüllfläche der gewählten Fahrkurve. Das Feld
 daneben stellt die Breite ein (Voreinstellung **0,50 m**, **0,25 m** ist möglich). Das Band gehört zur gewählten Fahrkurve
 und zur Live-Vorschau, nicht zu den abgeblendeten anderen Fahrkurven. Es ist im PNG-Export und im Vektor-Export enthalten.
 Die Quellen widersprechen sich, ob die Schablonen 30 cm oder 50 cm enthalten (siehe
@@ -125,7 +145,7 @@ scheinen die Innenkanten der Striche und die Überlappungen der Polygone nicht d
 
 ## Vektor-Export (DXF, SVG)
 Der PNG-Export ist ein Bildschirmbild und nicht maßstäblich. Die Buttons **DXF exportieren** und **SVG exportieren** in
-Abschnitt 5 schreiben das Ergebnis der gewählten Fahrkurve als Vektoren. Das Feld daneben wählt die **Einheit**:
+Schritt 5 schreiben das Ergebnis der gewählten Fahrkurve als Vektoren. Das Feld daneben wählt die **Einheit**:
 - **Meter** (Naturmaß). Im Text steht „Einheit: m“.
 - **Plan (pt):** die Einheit des PDF-Plans (1 pt = 1/72 Zoll). Der Maßstab steht im Text („1 m = 20,00 pt, ca. 1:142 bei
   Originalgröße“). So lässt sich das Ergebnis über den Plan legen.
@@ -181,10 +201,9 @@ nach § 32d StVZO; Knickwinkel-Grenze 100 gon geraten). Vor dem Einsatz mit **RB
 stehen sie in `Sim.SEMI_DEFAULTS` und `Sim.PRESETS`. Mit diesen Platzhaltern braucht der Wendekreis 52,0 gon Knickwinkel.
 
 ## Fahrkurven
-Wie bei den Fahrzeugen gibt es in Abschnitt 4 eine Liste von **Fahrkurven** mit **+**. Jede Fahrkurve hat eigene Punkte
-und ein eigenes Fahrzeug (Reiter in Abschnitt 3 wählt das Fahrzeug der gewählten Fahrkurve). Die gewählte Fahrkurve ist
-blau und lässt sich bearbeiten. Die anderen sind abgeblendet in eigenen Farben sichtbar. Die Tasten `[` und `]` wechseln
-die Fahrkurve. Die Fahrkurven werden nicht im Browser gespeichert, weil sie vom Plan und vom Maßstab abhängen.
+In Schritt 4 gibt es eine Liste von **Fahrkurven** (Reiter) mit **+**. Jede Fahrkurve hat eigene Punkte und ein eigenes
+Fahrzeug (Schritt 3 wählt das Fahrzeug der gewählten Fahrkurve und nennt sie dabei). Die gewählte Fahrkurve ist blau und
+lässt sich bearbeiten. Die anderen sind abgeblendet in eigenen Farben sichtbar. Die Fahrkurven werden nicht im Browser gespeichert, weil sie vom Plan und vom Maßstab abhängen.
 
 ### Versionen der Voreinstellungen
 Gespeicherte Voreinstellungen überschrieben früher korrigierte Werte für immer. Jetzt hat der Programmstand eine
@@ -199,7 +218,7 @@ jedes Feld einer Voreinstellung:
   Zahlen werden jetzt mit dem neuen Modell gerechnet (Radstand bis zur Mitte der Hinterachsen).
 - Neue Voreinstellungen werden hinten angefügt.
 
-Wurden Voreinstellungen aktualisiert oder ergänzt, zeigt ein Hinweis unter den Fahrzeug-Reitern, welche und von welcher
+Wurden Voreinstellungen aktualisiert oder ergänzt, zeigt ein Hinweis oben in der Seitenleiste, welche und von welcher
 Version auf welche (ein Klick blendet ihn aus). Daten aus der Zeit vor der Versionierung gelten als Version 1; für sie liegen
 die damaligen Werte in `Sim.PRESET_HISTORY`, damit auch dort Änderungen erkannt werden. Der Button „Voreinstellung
 wiederherstellen“ setzt alle Felder zurück. Beim Ändern einer Voreinstellung im Code: `PRESET_VERSION` erhöhen.

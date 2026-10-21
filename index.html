@@ -85,6 +85,7 @@
   .seg button { display:flex; flex-direction:column; align-items:center; gap:2px; padding:7px 4px; text-align:center; line-height:1.15; font-size:12px; }
   .seg button svg { width:34px; height:22px; }
   .seg button.on { background:var(--accbg); border-color:var(--acc); box-shadow:0 0 0 1px var(--acc) inset; }
+  .seg button small { font-size:11px; font-weight:400; }
   .chips { display:flex; gap:5px; flex-wrap:wrap; }
   .chip { border-radius:14px; padding:2px 10px; font-size:12px; }
   .chip.on { background:var(--acc); color:#fff; border-color:var(--acc); }
@@ -198,6 +199,13 @@
         <div class="work">
           <div class="chips" id="routeList" style="margin-bottom:6px"></div>
           <div class="row"><input id="r_name" type="text" style="flex:1;min-width:120px" title="Name der Fahrkurve"><button id="routeDel">Löschen</button></div>
+          <div class="mute small" style="margin:8px 0 4px">Fahrweise dieser Fahrkurve</div>
+          <div class="seg" style="grid-template-columns:1fr 1fr" id="fwSel">
+            <button data-fw="1" title="Fahrweise 1: Lenken während der Fahrt, tangentiale Bögen">Fahrweise 1<small class="mute">Lenken während der Fahrt</small></button>
+            <button data-fw="2" title="Fahrweise 2: Lenken im Stand bis zum Anschlag, Knick in der Leitlinie">Fahrweise 2<small class="mute">Lenken im Stand</small></button>
+          </div>
+          <div class="mute small" id="fwHelp" style="margin:4px 0"></div>
+          <div class="row"><button class="link" id="dupRoute" title="Kopie dieser Fahrkurve mit der anderen Fahrweise, zum Vergleichen">⧉ Mit Fahrweise 2 duplizieren</button></div>
           <div class="mute small" style="margin:8px 0 4px">Nächster Abschnitt</div>
           <div class="seg">
             <button data-seg="line" title="Taste G: Gerade bis zum Punkt, an Ecken entsteht ein Bogen"><svg viewBox="0 0 34 22"><path d="M2 18H18Q26 18 26 10V3" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="18" r="2.2" fill="currentColor"/></svg>Gerade / Ecke<kbd>G</kbd></button>

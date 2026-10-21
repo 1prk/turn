@@ -115,7 +115,11 @@
       <input id="silStep" type="number" min="0.5" step="0.5" value="2" style="width:56px"> m</div>
     <div class="row"><label title="Bewegungsspielraum um die überstrichene Fläche der gewählten Fahrkurve. Die RBSV-Schablonen zeigen 0,50 m, auch 0,25 m ist möglich"><input type="checkbox" id="oClear"> Bewegungsspielraum</label>
       <input id="clearM" type="number" min="0.05" max="5" step="0.05" value="0.5" style="width:60px" title="Breite des Bewegungsspielraums in m. Voreinstellung 0,50 m, zulässig auch 0,25 m"> m</div>
-    <div class="row"><button id="fit">Ansicht einpassen</button><button id="png">PNG exportieren</button></div>
+    <div class="row"><button id="fit">Ansicht einpassen</button><button id="png" title="Bild des Bildschirms, nicht maßstäblich">PNG exportieren</button></div>
+    <div class="row"><button id="dxf" title="DXF (R12, ASCII) der gewählten Fahrkurve: Leitlinie, Hinterachse, Hüllkurven, Fahrzeug am Start und Ende, Bewegungsspielraum, Text">DXF exportieren</button>
+      <button id="svg" title="SVG der gewählten Fahrkurve mit denselben Ebenen wie das DXF">SVG exportieren</button>
+      <select id="expUnit" title="Einheit der Koordinaten im Vektor-Export. DXF: Ursprung unten links an der Planseite, y nach oben. SVG: Plankoordinaten, y nach unten">
+        <option value="m">Einheit: Meter</option><option value="pt">Einheit: Plan (pt), Maßstab im Text</option></select></div>
 
     <h2>Tastenkürzel</h2>
     <div class="keys">
@@ -152,6 +156,7 @@
 
 <script src="vendor/pdf.min.js"></script>
 <script src="js/sim.js"></script>
+<script src="js/export.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

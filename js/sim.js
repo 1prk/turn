@@ -106,6 +106,13 @@
     return a;
   }
 
+  /* The distance from the point (px, py) to the line segment a-b. */
+  function segDist(px, py, a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+    const u = l2 > 0 ? Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / l2)) : 0;
+    return hyp(px - a.x - u * dx, py - a.y - u * dy);
+  }
+
   /* One step of a rigid link of the length L. The point F moves to the new position (Fx, Fy).
    * The point P (px, py) with the direction pth follows. P moves along its own direction, and the distance
    * to F stays equal to L. This is the rear axle of a car, or the rear axle of the rear body of a bus.
@@ -501,11 +508,39 @@
     return [front, bellows, rear];
   };
 
-  /* The four corners that make the outer lines (envelope) of the swept path:
-   * front left, front right, rear right, rear left. For an articulated vehicle, the rear corners are on the rear body. */
+  /* The points whose paths make the lines (envelope) of the swept path.
+   * The first four are the corners: front left, front right, rear right, rear left.
+   * For an articulated vehicle, the rear corners are on the rear body.
+   * The next points are the side points at the rigid axle of each rigid body: (0, -hw) and (0, +hw), front body first.
+   * The center of rotation (ICR) of a rigid body is on the line of its rigid axle. The nearest point of the inner side
+   * is the foot of the perpendicular from the ICR to this side. It is always at the x position of the rigid axle.
+   * The corners give the outer lines. The side points give the inner lines. Use Sim.trailInfo for the meaning of each point. */
   Sim.trailPoints = function (smp, v) {
-    const p = Sim.bodyPolys(smp, v);
-    return v.artic ? [p[0][0], p[0][1], p[2][2], p[2][3]] : p[0];
+    const p = Sim.bodyPolys(smp, v), hw = v.width / 2, last = p[p.length - 1];
+    const pts = v.artic ? [p[0][0], p[0][1], last[2], last[3]] : p[0].slice();
+    pts.push(Sim.local(smp, 0, -hw), Sim.local(smp, 0, hw));
+    if (v.artic) {
+      const c = Math.cos(smp.th2), sn = Math.sin(smp.th2);      // The rear body: the frame is at the rear axle T with the direction th2.
+      pts.push({ x: smp.Tx + hw * sn, y: smp.Ty - hw * c }, { x: smp.Tx - hw * sn, y: smp.Ty + hw * c });
+    }
+    return pts;
+  };
+
+  /* The meaning of the points of Sim.trailPoints. Each entry is { kind: 'corner' } or { kind: 'side', body, side }.
+   * body = 0 (front body) or 1 (rear body). side = -1 (y < 0) or +1 (y > 0) in the frame of the body. */
+  Sim.trailInfo = function (v) {
+    const info = [{ kind: 'corner' }, { kind: 'corner' }, { kind: 'corner' }, { kind: 'corner' }];
+    for (let b = 0; b < (v.artic ? 2 : 1); b++) info.push({ kind: 'side', body: b, side: -1 }, { kind: 'side', body: b, side: 1 });
+    return info;
+  };
+
+  /* The side of the center of rotation of a rigid body between the samples i and i + 1:
+   * +1 = on the side y > 0 of the body, -1 = on the side y < 0, 0 = the body goes straight.
+   * The body drives forward. Its direction increases when the center of rotation is on the side y > 0. */
+  Sim.turnSide = function (smp, i, body) {
+    const a = smp[Math.max(0, Math.min(i, smp.length - 2))], b = smp[Math.max(1, Math.min(i + 1, smp.length - 1))];
+    const dth = normAngle(body ? b.th2 - a.th2 : b.th - a.th);
+    return Math.abs(dth) < 1e-9 ? 0 : dth > 0 ? 1 : -1;
   };
 
   /* The articulation angle in a steady turn at full lock (radians). It is the angle that the vehicle needs
@@ -545,6 +580,30 @@
     add('Kreisfahrt: Hinterachsradius = √(R² − Radstand²)', dev < 0.01, 'max. Abweichung ' + (dev * 1000).toFixed(1) + ' mm');
     add('Vollausschlag: äußere Ecke auf Wendekreis ' + v.rOuter + ' m', Math.abs(maxCorner - v.rOuter) < 0.02, 'gemessen ' + maxCorner.toFixed(3) + ' m');
     add('Vollausschlag: Lenkwinkel stationär = δmax', Math.abs(dMax - lim.delta) < 0.005, Sim.gon(dMax).toFixed(2) + ' gon');
+
+
+    // Inner envelope. In a long turn at full lock, the center of rotation is on the line of the rigid axle.
+    // The inner side of each rigid body is at the radius (radius of the rigid axle) - (half width), at the x position of this axle.
+    // The corners are farther away. No point of the polygon edges is closer to the center.
+    for (const veh2 of Sim.PRESETS) {
+      const lim2 = Sim.steerLimit(veh2), turns = veh2.artic ? 4 : 2, st2 = 0.05, n2 = Math.round(turns * 2 * Math.PI * lim2.rFront / st2);
+      const c2 = [];
+      for (let i = 0; i <= n2; i++) { const a = i * st2 / lim2.rFront; c2.push({ x: lim2.rFront * Math.cos(a), y: lim2.rFront * Math.sin(a) }); }
+      const r2 = Sim.run(c2, veh2).slice(Math.floor(n2 * 0.8));
+      const rh2 = hyp(lim2.rRear, veh2.artic ? veh2.hitch : 0), hw2 = veh2.width / 2;
+      const expect = Math.min(lim2.rRear, veh2.artic ? Math.sqrt(rh2 * rh2 - veh2.axle2 * veh2.axle2) : Infinity) - hw2;
+      let minSide = Infinity, minCorner = Infinity, minEdge = Infinity;
+      for (const q of r2) {
+        const tp = Sim.trailPoints(q, veh2);
+        tp.forEach((c, k) => { if (k < 4) minCorner = Math.min(minCorner, hyp(c.x, c.y)); else minSide = Math.min(minSide, hyp(c.x, c.y)); });
+        for (const poly of Sim.bodyPolys(q, veh2)) {
+          for (let k = 0; k < poly.length; k++) minEdge = Math.min(minEdge, segDist(0, 0, poly[k], poly[(k + 1) % poly.length]));
+        }
+      }
+      add(veh2.name + ': innere Hüllkurve = Achsradius − halbe Breite (' + expect.toFixed(2) + ' m)', Math.abs(minSide - expect) < 0.01,
+        'Seitenpunkte ' + minSide.toFixed(3) + ' m, nur Ecken ' + minCorner.toFixed(3) + ' m');
+      add(veh2.name + ': kein Punkt der Karosseriekanten liegt weiter innen', minEdge >= expect - 0.001, 'kleinster Abstand der Kanten ' + minEdge.toFixed(3) + ' m');
+    }
 
     const line = [];
     for (let i = 0; i <= 400; i++) line.push({ x: i * 0.05, y: 0 });

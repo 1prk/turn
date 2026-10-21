@@ -95,5 +95,5 @@ Zeichnung ist stimmig (Summe 18,00 m) und ist deshalb die Grundlage.
 | Die Kurve beginnt an der aktuellen Fahrzeugposition, Tangente davor und danach. | Die Kurve beginnt am Ende der Fahrlinie. Davor kann eine Gerade liegen. Danach läuft eine Gerade tangential. |
 | Fahrweise 1: Einschlag während der Fahrt, tangential, Außenradius = Wendekreis. | Unverändert. Der Einschlag ergibt sich aus dem Nachlaufen der Hinterachse. |
 | Fahrweise 2 (Einschlag im Stand). | Noch nicht umgesetzt. Nächster Schritt. |
-| Hüllkurve, Sicherheitsabstand. | Hüllkurve aus den vier Karosserieecken. Ein Sicherheitsabstand fehlt noch. |
+| Hüllkurve, Sicherheitsabstand. | Hüllkurve außen aus den Karosserieecken, innen aus den Seitenpunkten an der starren Achse (der innerste Punkt liegt nicht an einer Ecke). Der Bewegungsspielraum (Voreinstellung 0,50 m, auch 0,25 m) ist ein wählbares Band um die Hüllfläche. Ob die RBSV-Schablonen 30 cm oder 50 cm enthalten, ist nicht belegt (siehe Abschnitt 1). |
 | Gelenkbus: zwei Karosserien, Traktrix der hinteren Achse, Knickwinkel-Grenze. | **Gelenkfahrzeug** mit Gelenkpunkt, zweiter Karosserie, Faltenbalg und Grenzwert für den Knickwinkel. Eine Fahrkurve, die den Grenzwert überschreitet, ist nicht möglich. |

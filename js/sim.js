@@ -56,6 +56,55 @@
   ];
   Sim.DEFAULT_VEHICLE = Object.assign({}, Sim.PRESETS[0]);
 
+  /* Preset versioning. The browser stores the vehicles. A stored preset must not hide a corrected preset value for ever.
+   * PRESET_VERSION is the version of the preset values. Raise it when a preset value changes.
+   * Each stored preset vehicle has a copy of the preset values that it came from (base).
+   * On load, a field that is the same as in base is not changed by the user: it gets the new preset value.
+   * A field that is different from base is a change of the user: it stays.
+   * Data from before the versioning have no base. They are version 1. PRESET_HISTORY has the preset values of this version. */
+  Sim.PRESET_VERSION = 2;
+  Sim.PRESET_HISTORY = {
+    1: [
+      { name: 'PKW', wb: 2.86, front: 0.92, rear: 1.10, width: 1.89, rOuter: 5.85, track: 1.60, ratio: 13, gap: 0, trail: false, preset: true },
+      { name: 'LKW', wb: 5.17, front: 1.36, rear: 2.69, width: 2.30, rOuter: 9.46, track: 1.90, ratio: 20, gap: 0, trail: false, preset: true },
+      { name: 'Müllfahrzeug 3-achsig', wb: 4.77, front: 1.53, rear: 3.60, width: 2.55, rOuter: 10.25, track: 2.00, ratio: 20, gap: 1.35, trail: false, preset: true },
+      { name: 'Müllfahrzeug 3-achsig Nachlaufachse', wb: 3.90, front: 1.35, rear: 4.70, width: 2.55, rOuter: 8.60, track: 2.00, ratio: 20, gap: 1.35, trail: true, preset: true },
+      { name: 'Gelenkbus 3-achsig (18 m)', wb: 5.90, front: 2.70, rear: 9.40, width: 2.55, rOuter: 11.40, track: 2.10, ratio: 20, gap: 0, trail: false,
+        artic: true, hitch: 1.79, axle2: 4.21, rearOver: 3.40, knickGon: 65, preset: true }
+    ]
+  };
+
+  /* A preset as a vehicle for the list: a copy with the base values. */
+  Sim.freshPreset = function (p) { return Object.assign({}, p, { base: Object.assign({}, p) }); };
+
+  /* Merge the saved vehicles ({ list, presetVersion }) with the presets of the program.
+   * Return { list, updated, added, from, to }: the new list, the names of the presets that got new values,
+   * the names of the presets that were added, and the versions. A user vehicle (preset is not true) does not change. */
+  Sim.mergePresets = function (saved) {
+    const from = saved.presetVersion || 1, hist = Sim.PRESET_HISTORY[from] || [];
+    const list = [], updated = [], added = [], used = {};
+    const same = (a, b) => a === b;
+    saved.list.forEach((sv) => {
+      const baseName = sv.base ? sv.base.name : sv.name;           // A renamed preset keeps the name in base.
+      const p = sv.preset ? Sim.PRESETS.find((q) => q.name === baseName) : null;
+      const base = sv.base || hist.find((q) => q.name === baseName);
+      if (!p || !base) { list.push(Object.assign({}, Sim.PRESETS[0], sv)); return; }      // A user vehicle, or an unknown preset: keep it.
+      used[p.name] = true;
+      const v = Object.assign({}, p);
+      let changed = false;
+      Object.keys(p).forEach((f) => {
+        if (f in sv && !same(sv[f], base[f])) v[f] = sv[f];         // The user changed this field.
+        else if (!same(f in sv ? sv[f] : f in base ? base[f] : p[f], p[f])) changed = true;      // The preset value is new.
+      });
+      Object.keys(sv).forEach((f) => { if (!(f in p) && f !== 'base') v[f] = sv[f]; });
+      v.base = Object.assign({}, p);
+      if (changed) updated.push(p.name);
+      list.push(v);
+    });
+    Sim.PRESETS.forEach((p) => { if (!used[p.name]) { list.push(Sim.freshPreset(p)); added.push(p.name); } });
+    return { list: list, updated: updated, added: added, from: from, to: Sim.PRESET_VERSION };
+  };
+
   /* The geometry that the model uses for a vehicle. The stored vehicle data do not change.
    * The model rear axle is the rigid axle. The center of rotation (ICR) of the vehicle is on the line of this axle.
    * Normally this is the center of the rear axles. With a trailing steered axle (trail and gap > 0), the rearmost axle
@@ -982,6 +1031,34 @@
     }
     add('Zielpunkt-Begrenzung (Gerade und Bogen gemischt): alle Routen fahrbar, ohne Sprünge', badMix === 0 && jumpMix === 0,
       totalMix + ' Punkte, davon ' + clampMix + ' begrenzt, ' + bigTurn + ' Wenden über 200 gon, ' + badMix + ' nicht fahrbar, ' + jumpMix + ' Sprünge');
+
+    // Preset versioning. Saved vehicles from before the versioning (version 1, no base) are merged with the new presets.
+    const legacy = Sim.PRESET_HISTORY[1].map((p) => Object.assign({}, p));
+    legacy[0].ratio = 15;                                                      // The user changed the steering ratio of the PKW.
+    const mine = Object.assign({}, Sim.PRESETS[0], { name: 'Mein Fahrzeug', preset: false, wb: 3.3 });
+    const mg1 = Sim.mergePresets({ list: legacy.concat([mine]), sel: 0 });
+    const g = (m, name) => m.list.find((q) => q.name === name);
+    const trailName = Sim.PRESETS.find((q) => q.trail && q.gap > 0).name, trailNew = Sim.PRESETS.find((q) => q.name === trailName);
+    add('Voreinstellungen: ein alter Stand bekommt die neuen Werte (Nachlaufachse), eigene Änderungen und eigene Fahrzeuge bleiben',
+      g(mg1, trailName).wb === trailNew.wb && g(mg1, trailName).rear === trailNew.rear && mg1.updated.length === 1 && mg1.updated[0] === trailName &&
+      g(mg1, 'PKW').ratio === 15 && g(mg1, 'LKW').rOuter === 9.46 && JSON.stringify(g(mg1, 'Mein Fahrzeug')) === JSON.stringify(mine) &&
+      mg1.added.length === 1 && mg1.added[0] === Sim.PRESETS.find((q) => q.kind === 'semi').name && mg1.from === 1 && mg1.to === Sim.PRESET_VERSION,
+      'aktualisiert: ' + mg1.updated.join(', ') + '; neu: ' + mg1.added.join(', '));
+    const mg2 = Sim.mergePresets({ list: mg1.list, presetVersion: Sim.PRESET_VERSION });
+    add('Voreinstellungen: erneutes Laden ändert nichts', mg2.updated.length === 0 && mg2.added.length === 0 && JSON.stringify(mg2.list) === JSON.stringify(mg1.list), mg2.list.length + ' Fahrzeuge');
+    // A later change of a preset: the saved copy follows it, except for the field that the user changed. A renamed preset is not added again.
+    const pkw0 = Sim.PRESETS[0], wb0 = pkw0.wb, front0 = pkw0.front;
+    let mg3, mg3n;
+    try {
+      pkw0.wb = 2.90; pkw0.front = 1.00;
+      const edited = mg2.list.map((q) => (q.name === 'PKW' ? Object.assign({}, q, { front: 0.95, name: 'PKW Golf' }) : q));      // The user changed a field and the name.
+      mg3 = Sim.mergePresets({ list: edited, presetVersion: Sim.PRESET_VERSION });
+      mg3n = Sim.mergePresets({ list: mg2.list, presetVersion: Sim.PRESET_VERSION });
+    } finally { pkw0.wb = wb0; pkw0.front = front0; }
+    add('Voreinstellungen: eine geänderte Voreinstellung wirkt auf Kopien, eigenes Feld und eigener Name bleiben, kein Doppel',
+      g(mg3, 'PKW Golf').wb === 2.90 && g(mg3, 'PKW Golf').front === 0.95 && g(mg3, 'PKW Golf').ratio === 15 && !g(mg3, 'PKW') && mg3.added.length === 0 && mg3.updated.join() === 'PKW' &&
+      g(mg3n, 'PKW').front === 1.00 && g(mg3n, 'PKW').ratio === 15,
+      'PKW Golf: Radstand ' + g(mg3, 'PKW Golf').wb + ', Überhang vorn ' + g(mg3, 'PKW Golf').front + ' (eigener Wert)');
 
     // The tests of the vector export (js/export.js). In the browser, the file is loaded with a script tag.
     const X = typeof require === 'function' ? require('./export.js') : root.Export;

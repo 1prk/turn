@@ -185,6 +185,24 @@ und ein eigenes Fahrzeug (Reiter in Abschnitt 3 wählt das Fahrzeug der gewählt
 blau und lässt sich bearbeiten. Die anderen sind abgeblendet in eigenen Farben sichtbar. Die Tasten `[` und `]` wechseln
 die Fahrkurve. Die Fahrkurven werden nicht im Browser gespeichert, weil sie vom Plan und vom Maßstab abhängen.
 
+### Versionen der Voreinstellungen
+Gespeicherte Voreinstellungen überschrieben früher korrigierte Werte für immer. Jetzt hat der Programmstand eine
+**Version der Voreinstellungen** (`Sim.PRESET_VERSION`, aktuell 2). Der Browser speichert sie mit den Fahrzeugen, und jedes
+gespeicherte Voreinstellungs-Fahrzeug trägt eine Kopie der Werte, aus denen es entstanden ist (`base`). Beim Laden gilt für
+jedes Feld einer Voreinstellung:
+- Ist der gespeicherte Wert gleich dem Wert in `base`, hat der Nutzer ihn nicht geändert: Das Fahrzeug bekommt den **neuen
+  Wert der Voreinstellung**.
+- Ist er verschieden, hat der Nutzer ihn geändert: Er **bleibt**. Das gilt auch für den Namen (eine umbenannte
+  Voreinstellung wird über `base` erkannt und nicht doppelt angelegt).
+- Eigene Fahrzeuge (Kopien mit **+**) bleiben unverändert. Das gilt auch für eine Kopie des Fahrzeugs mit Nachlaufachse: Ihre
+  Zahlen werden jetzt mit dem neuen Modell gerechnet (Radstand bis zur Mitte der Hinterachsen).
+- Neue Voreinstellungen werden hinten angefügt.
+
+Wurden Voreinstellungen aktualisiert oder ergänzt, zeigt ein Hinweis unter den Fahrzeug-Reitern, welche und von welcher
+Version auf welche (ein Klick blendet ihn aus). Daten aus der Zeit vor der Versionierung gelten als Version 1; für sie liegen
+die damaligen Werte in `Sim.PRESET_HISTORY`, damit auch dort Änderungen erkannt werden. Der Button „Voreinstellung
+wiederherstellen“ setzt alle Felder zurück. Beim Ändern einer Voreinstellung im Code: `PRESET_VERSION` erhöhen.
+
 ## Schleppkurve und Leitlinie
 Die Vorderräder werden auf der Leitlinie geführt. Sie besteht aus Geraden und Kreisbögen, an denen ein Punkt des
 Fahrzeugs (hier die Vorderachsmitte) entlangfährt. Die Hinterachse läuft zwangsgeführt auf einer nach innen
@@ -218,7 +236,7 @@ Wendekreisradius außen 5,85 m (äußerste Karosserieecke bei Vollausschlag) →
 
 ## Modell
 Kinematisches Einspurmodell, die Hinterachse folgt zwangsgeführt. Nur Vorwärtsfahrt. Der Button „Kinematik prüfen“ führt Selbsttests aus
-(Kreisfahrt, Wendekreis, innere Hüllkurve, Nachlaufachse, Sattelzug, Vektor-Export, Geradeausfahrt, Maßstab, Fahrweise 1: Tangentialität, Mindestradius, Radius wächst mit Abstand, Zielpunkt-Begrenzung, LKW); auch per `node -e "console.log(require('./js/sim.js').selfTest().filter(r => !r.ok))"` (leere Liste = alles bestanden).
+(Kreisfahrt, Wendekreis, innere Hüllkurve, Nachlaufachse, Sattelzug, Vektor-Export, Versionen der Voreinstellungen, Geradeausfahrt, Maßstab, Fahrweise 1: Tangentialität, Mindestradius, Radius wächst mit Abstand, Zielpunkt-Begrenzung, LKW); auch per `node -e "console.log(require('./js/sim.js').selfTest().filter(r => !r.ok))"` (leere Liste = alles bestanden).
 
 ## Aufbau
 - `index.html` – Oberfläche

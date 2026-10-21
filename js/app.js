@@ -32,20 +32,25 @@
   const FIELDS = { v_wb: 'wb', v_front: 'front', v_rear: 'rear', v_width: 'width', v_rout: 'rOuter', v_track: 'track', v_ratio: 'ratio', v_gap: 'gap',
                    v_hitch: 'hitch', v_axle2: 'axle2', v_rearOver: 'rearOver', v_knick: 'knickGon',
                    v_tractorRear: 'tractorRear', v_trailerFront: 'trailerFront', v_trailerWidth: 'trailerWidth' };
-  let vehicles = Sim.PRESETS.map((v) => Object.assign({}, v)), selIdx = 0;
+  let vehicles = Sim.PRESETS.map(Sim.freshPreset), selIdx = 0, presetNote = '';
   try {      // The browser can block the storage. The page also works without it.
     const saved = JSON.parse(localStorage.getItem(STORE));
     if (saved && Array.isArray(saved.list) && saved.list.length) {
-      vehicles = saved.list.map((v) => Object.assign({}, Sim.PRESETS[0], v));
-      // Add the preset vehicles that the saved list does not have. This is the case after an update.
-      Sim.PRESETS.forEach((p) => { if (!vehicles.some((v) => v.name === p.name)) vehicles.push(Object.assign({}, p)); });
+      // The preset vehicles get the new preset values, except for the fields that the user changed. New presets are added.
+      const m = Sim.mergePresets(saved);
+      vehicles = m.list;
       selIdx = Math.min(Math.max(0, saved.sel | 0), vehicles.length - 1);
+      const parts = [];
+      if (m.updated.length) parts.push('aktualisiert: ' + m.updated.join(', ') + ' (eigene Änderungen bleiben erhalten)');
+      if (m.added.length) parts.push('neu: ' + m.added.join(', '));
+      if (parts.length) presetNote = 'Voreinstellungen (Version ' + m.from + ' → ' + m.to + ') ' + parts.join(' · ');
     }
   } catch (err) { /* Use the preset vehicles. */ }
   let veh = vehicles[selIdx];
   function saveVehicles() {
-    try { localStorage.setItem(STORE, JSON.stringify({ list: vehicles, sel: selIdx })); } catch (err) { /* There is no storage. */ }
+    try { localStorage.setItem(STORE, JSON.stringify({ list: vehicles, sel: selIdx, presetVersion: Sim.PRESET_VERSION })); } catch (err) { /* There is no storage. */ }
   }
+  if (presetNote) saveVehicles();      // Store the new version. The note is only for this session.
   let pdfDoc = null, spaceDown = false, drag = null, lastClick = { t: 0, x: 0, y: 0 };
 
   /* ---------- driving lines ---------- */
@@ -847,6 +852,7 @@
     box.appendChild(add);
     $('vehDel').style.display = veh.preset ? 'none' : '';
     $('vehReset').style.display = veh.preset ? '' : 'none';
+    $('presetNote').textContent = presetNote; $('presetNote').style.display = presetNote ? '' : 'none';
   }
 
   // The kind of a vehicle: 'rigid', 'bus' (articulated bus) or 'semi' (semitrailer).
@@ -882,10 +888,13 @@
   function addVehicle() {
     const name = prompt('Name des neuen Fahrzeugs (Kopie von „' + veh.name + '“):', 'Fahrzeug ' + (vehicles.length + 1));
     if (name == null || !name.trim()) return;
-    vehicles.push(Object.assign({}, veh, { name: name.trim(), preset: false }));
+    const copy = Object.assign({}, veh, { name: name.trim(), preset: false });
+    delete copy.base;                  // A copy is a user vehicle. It does not follow the presets.
+    vehicles.push(copy);
     selectVehicle(vehicles.length - 1);
   }
 
+  $('presetNote').addEventListener('click', () => { presetNote = ''; renderVehicles(); });      // A click hides the note.
   $('vehDel').addEventListener('click', () => {
     if (veh.preset || !confirm('Fahrzeug „' + veh.name + '“ löschen?')) return;
     const gone = veh;
@@ -894,8 +903,8 @@
     selectVehicle(Math.max(0, selIdx - 1));
   });
   $('vehReset').addEventListener('click', () => {
-    const base = Sim.PRESETS.find((v) => v.name === veh.name);
-    if (base) { Object.assign(veh, base); refreshFields(); saveVehicles(); recompute(); }
+    const base = Sim.PRESETS.find((v) => v.name === (veh.base ? veh.base.name : veh.name));      // A renamed preset keeps the name in base.
+    if (base) { Object.assign(veh, base); veh.base = Object.assign({}, base); refreshFields(); renderVehicles(); renderRoutes(); saveVehicles(); recompute(); }
   });
   $('v_name').addEventListener('input', () => { veh.name = $('v_name').value || 'Fahrzeug'; renderVehicles(); renderRoutes(); saveVehicles(); });
   Object.keys(FIELDS).forEach((id) => {

@@ -134,8 +134,6 @@
   function finishScale() {
     const pts = S.scalePts;
     if (pts.length < 2) return;
-    let L = 0;
-    for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
     const ans = prompt('Länge der Strecke zwischen den beiden Punkten in m:', '');
     const m = ans == null ? NaN : parseFloat(String(ans).replace(',', '.'));
     if (!(m > 0)) { S.scalePts = []; requestDraw(); return; }
@@ -296,7 +294,7 @@
   function updateInfo() {
     const lim = Sim.steerLimit(veh);
     $('vInfo').innerHTML = 'Länge gesamt ' + f(veh.front + veh.wb + veh.rear, 2) + ' m · ' + (lim
-      ? 'max. Lenkwinkel ' + f(gon(lim.delta), 1) + ' gon · Radius Hinterachse ' + f(lim.rRear, 2) + ' m' + articInfo()
+      ? 'Wendekreis ⌀ ' + f(2 * veh.rOuter, 2) + ' m · max. Lenkwinkel ' + f(gon(lim.delta), 1) + ' gon · Radius Hinterachse ' + f(lim.rRear, 2) + ' m' + articInfo()
       : '<span class="bad">Wendekreis passt nicht zu den Maßen</span>');
     if (S.mpp) {
       const ratio = 1000 * S.mpp / 0.352778;   // The paper scale 1:x, if the PDF page has the true size.
@@ -311,6 +309,9 @@
     else if (R) {
       rows.push(['Weglänge', f(R.length, 1) + ' m']);
       rows.push(['Richtungsänderung', f(Math.abs(gon(R.turn)), 1) + ' gon ' + (Math.abs(R.turn) < 1e-3 ? '' : R.turn > 0 ? '(rechts)' : '(links)')]);
+      rows.push(['Leitlinie', 'Mitte der Vorderachse']);
+      rows.push(['Wendekreis ⌀ (Platzbedarf einer Wende)', f(2 * veh.rOuter, 2) + ' m']);
+      if (R.lastArc && Math.abs(gon(R.lastArc.delta)) >= 150) rows.push(['Querversatz der Leitlinie 2R', f(2 * R.lastArc.R, 2) + ' m (nur die Leitlinie)']);
       rows.push(['Max. Lenkwinkel', f(gon(R.maxD), 1) + ' gon von ' + f(gon(R.lim.delta), 1) + ' gon']);
       rows.push(['Lenkrad max.', f(gon(R.maxD) * veh.ratio, 0) + ' gon von ' + f(gon(R.lim.delta) * veh.ratio, 0) + ' gon']);
       rows.push(['Lenkung am Anschlag', R.satLen > 0.01 ? '<span class="warn">' + f(R.satLen, 1) + ' m</span>' : 'nein']);
@@ -324,7 +325,8 @@
       rows.push(['Vorschau', !P.ok ? '<span class="bad">' + failShort(P.fail) + '</span>'
         : P.clamped ? '<span class="warn">begrenzt: weiter geht es nicht</span>' : '<span class="good">fahrbar</span>']);
       rows.push(['Vorschau: Richtungsänderung', f(Math.abs(gon(P.turn)), 1) + ' gon']);
-      if (P.lastArc) rows.push(['Vorschau: Bogen', 'R = ' + f(P.lastArc.R, 1) + ' m · ' + f(Math.abs(gon(P.lastArc.delta)), 1) + ' gon']);
+      if (P.lastArc) rows.push(['Vorschau: Bogen der Leitlinie', 'R = ' + f(P.lastArc.R, 1) + ' m · ' + f(Math.abs(gon(P.lastArc.delta)), 1) + ' gon']);
+      if (P.lastArc && Math.abs(gon(P.lastArc.delta)) >= 150) rows.push(['Vorschau: Querversatz der Leitlinie 2R', f(2 * P.lastArc.R, 2) + ' m (Platzbedarf etwa Wendekreis ⌀ ' + f(2 * veh.rOuter, 2) + ' m)']);
       rows.push(['Vorschau: Lenkwinkel max.', f(gon(P.maxD), 1) + ' gon (Lenkrad ' + f(gon(P.maxD) * veh.ratio, 0) + ' gon)']);
       if (veh.artic) rows.push(['Vorschau: Knickwinkel max.', f(gon(P.maxPhi), 1) + ' gon von ' + f(veh.knickGon, 1) + ' gon']);
     }
@@ -622,7 +624,7 @@
   /* ---------- tools and input ---------- */
   const HINTS = {
     scale: 'Maßstab: Zwei Punkte auf eine Strecke mit bekannter Länge klicken (Bemaßung, Fahrbahnbreite). Danach die Länge in m eingeben. Plan verschieben: mit der linken Maustaste ziehen. Zoom: Mausrad. Esc bricht ab.',
-    drive: 'Fahrweise 1. 1. Klick = Start der Vorderachsmitte, 2. Klick = erste Gerade und Fahrtrichtung. Drei Arten von Abschnitten: Gerade/Ecke (G): An jedem Eckpunkt zwischen zwei Geraden entsteht ein tangentialer Bogen, je weiter die Punkte auseinander liegen, desto größer. Bogen durch Punkt (B): ein Kreisbogen vom Fahrzeugende durch den Punkt an der Maus. Kurve nach Winkel (K): ein Bogen mit der Richtungsänderung in gon (RBSV-Schablone, 200 gon = Wende in einem Zug). Die Maus links oder rechts vom Fahrzeug wählt die Drehrichtung, der Klick setzt die Kurve. Taste W = Wende mit 200 gon. Der Radius bleibt immer über dem Wendekreis. Ist etwas nicht fahrbar, wird es begrenzt (orange). Esc = Fahrlinie beenden.',
+    drive: 'Fahrweise 1. Die Leitlinie ist der Weg der Mitte der Vorderachse, nicht der Karosserie. 1. Klick = Start der Vorderachsmitte, 2. Klick = erste Gerade und Fahrtrichtung. Drei Arten von Abschnitten: Gerade/Ecke (G): An jedem Eckpunkt zwischen zwei Geraden entsteht ein tangentialer Bogen, je weiter die Punkte auseinander liegen, desto größer. Bogen durch Punkt (B): ein Kreisbogen vom Fahrzeugende durch den Punkt an der Maus. Kurve nach Winkel (K): ein Bogen mit der Richtungsänderung in gon (RBSV-Schablone, 200 gon = Wende in einem Zug). Die Maus links oder rechts vom Fahrzeug wählt die Drehrichtung, der Klick setzt die Kurve. Taste W = Wende mit 200 gon (der Querversatz 2R ist nur der Versatz der Leitlinie, der Platzbedarf ist etwa der Wendekreisdurchmesser des Fahrzeugs). Der Radius bleibt immer über dem Wendekreis. Ist etwas nicht fahrbar, wird es begrenzt (orange). Esc = Fahrlinie beenden.',
     view: 'Ansicht: Die Fahrlinie ist beendet. F = Fahrlinie weiter bearbeiten, M = Maßstab. Plan verschieben: ziehen.'
   };
 

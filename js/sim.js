@@ -139,60 +139,6 @@
     return { delta: Math.atan(wb / rRear), rRear: rRear, rFront: hyp(rRear, wb) };
   };
 
-  function mix(a, b, ta, tb, t) {
-    const u = (tb - t) / (tb - ta), w = (t - ta) / (tb - ta);
-    return { x: a.x * u + b.x * w, y: a.y * u + b.y * w };
-  }
-
-  // Centripetal Catmull-Rom spline (Barry-Goldman). The value u goes from 0 to 1, from p1 to p2.
-  function cr(p0, p1, p2, p3, u) {
-    const t0 = 0;
-    const t1 = t0 + Math.sqrt(hyp(p1.x - p0.x, p1.y - p0.y));
-    const t2 = t1 + Math.sqrt(hyp(p2.x - p1.x, p2.y - p1.y));
-    const t3 = t2 + Math.sqrt(hyp(p3.x - p2.x, p3.y - p2.y));
-    const t = t1 + (t2 - t1) * u;
-    const A1 = mix(p0, p1, t0, t1, t), A2 = mix(p1, p2, t1, t2, t), A3 = mix(p2, p3, t2, t3, t);
-    const B1 = mix(A1, A2, t0, t2, t), B2 = mix(A2, A3, t1, t3, t);
-    return mix(B1, B2, t1, t2, t);
-  }
-
-  Sim.resample = function (pts, step) {
-    if (pts.length < 2) return pts.slice();
-    const cum = [0];
-    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + hyp(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
-    const total = cum[cum.length - 1];
-    const out = [];
-    let j = 1;
-    for (let s = 0; s < total; s += step) {
-      while (j < pts.length - 1 && cum[j] < s) j++;
-      const seg = cum[j] - cum[j - 1];
-      const u = seg > 0 ? (s - cum[j - 1]) / seg : 0;
-      out.push({ x: pts[j - 1].x + (pts[j].x - pts[j - 1].x) * u, y: pts[j - 1].y + (pts[j].y - pts[j - 1].y) * u });
-    }
-    out.push({ x: pts[pts.length - 1].x, y: pts[pts.length - 1].y });
-    return out;
-  };
-
-  /* Change the control points into a smooth curve. The points on the curve have the distance "step". */
-  Sim.smooth = function (ctrl, step) {
-    const pts = [];
-    for (const p of ctrl) {
-      const l = pts[pts.length - 1];
-      if (!l || hyp(p.x - l.x, p.y - l.y) > 1e-6) pts.push({ x: p.x, y: p.y });
-    }
-    if (pts.length < 2) return pts;
-    const n = pts.length;
-    const ext = [{ x: 2 * pts[0].x - pts[1].x, y: 2 * pts[0].y - pts[1].y }].concat(pts,
-      [{ x: 2 * pts[n - 1].x - pts[n - 2].x, y: 2 * pts[n - 1].y - pts[n - 2].y }]);
-    const dense = [pts[0]];
-    for (let i = 1; i < ext.length - 2; i++) {
-      const len = hyp(ext[i + 1].x - ext[i].x, ext[i + 1].y - ext[i].y);
-      const m = Math.max(4, Math.ceil(len / (step * 0.5)));
-      for (let k = 1; k <= m; k++) dense.push(cr(ext[i - 1], ext[i], ext[i + 1], ext[i + 2], k / m));
-    }
-    return Sim.resample(dense, step);
-  };
-
   function normAngle(a) {
     while (a > Math.PI) a -= 2 * Math.PI;
     while (a < -Math.PI) a += 2 * Math.PI;
@@ -917,17 +863,18 @@
     const bus = Sim.PRESETS.find((b) => b.artic && b.kind !== 'semi'), ob = Sim.driveOpts(bus), limB = Sim.steerLimit(bus);
     const busStraight = Sim.buildRoute([pt(0, 0), pt(40, 0)], bus, ob);
     add('Gelenkbus: Geradeausfahrt, Knickwinkel 0', !busStraight.fail && busStraight.smp.every((q) => Math.abs(q.phi) < 1e-9), '');
-    const busTurn = Sim.makeTurn([pt(0, 0), pt(40, 0)], 1, 1.9 * Math.PI, 0, bus, ob);
+    // A turn of 4 pi (two revolutions) reaches the steady state. The test uses the last 20 % of the samples.
+    const busTurn = Sim.makeTurn([pt(0, 0), pt(40, 0)], 1, 4 * Math.PI, 0, bus, ob);
+    const rH = hyp(limB.rRear, bus.hitch), rA3Analytic = Math.sqrt(rH * rH - bus.axle2 * bus.axle2);
     let hingeErr = 0, phiSim = 0, rA3 = 0;
     busTurn.run.smp.forEach((q, i) => {
       hingeErr = Math.max(hingeErr, Math.abs(hyp(q.Hx - q.Tx, q.Hy - q.Ty) - bus.axle2));
-      if (i > busTurn.run.smp.length * 0.7) { phiSim = Math.max(phiSim, Math.abs(q.phi)); rA3 = hyp(q.Tx - 40, q.Ty - limB.rFront); }
+      if (i > busTurn.run.smp.length * 0.8) { phiSim = Math.max(phiSim, Math.abs(q.phi)); rA3 = Math.max(rA3, Math.abs(hyp(q.Tx - 40, q.Ty - limB.rFront) - rA3Analytic)); }
     });
-    const rH = hyp(limB.rRear, bus.hitch), rA3Analytic = Math.sqrt(rH * rH - bus.axle2 * bus.axle2);
     add('Gelenkbus: Abstand Gelenk–Hinterachse bleibt konstant', hingeErr < 1e-9, 'Abweichung ' + hingeErr.toExponential(1) + ' m');
     add('Gelenkbus: Knickwinkel bei vollem Einschlag = Geometrie (' + Sim.gon(Sim.articSteady(bus)).toFixed(1) + ' gon)',
       Math.abs(phiSim - Sim.articSteady(bus)) < Math.PI / 200 * 1.5, 'Simulation ' + Sim.gon(phiSim).toFixed(1) + ' gon');
-    add('Gelenkbus: Radius der Hinterachse = Geometrie (' + rA3Analytic.toFixed(2) + ' m)', Math.abs(rA3 - rA3Analytic) < 0.1, 'Simulation ' + rA3.toFixed(2) + ' m');
+    add('Gelenkbus: Radius der Hinterachse = Geometrie (' + rA3Analytic.toFixed(2) + ' m)', rA3 < 0.02, 'max. Abweichung ' + (rA3 * 1000).toFixed(1) + ' mm');
     add('Gelenkbus: der Grenzwert für den Knickwinkel reicht für den Wendekreis', bus.knickGon * Math.PI / 200 >= Sim.articSteady(bus),
       'Grenze ' + bus.knickGon + ' gon, nötig ' + Sim.gon(Sim.articSteady(bus)).toFixed(1) + ' gon');
     const busLow = Object.assign({}, bus, { knickGon: 45 });          // 45 gon is too small for the turning circle.
@@ -962,7 +909,7 @@
       const t200 = Sim.makeTurn([pt(0, 0), pt(20, 0)], 1, Math.PI, 0, veh2, o2), e2 = t200.run.end;
       add(veh2.name + ': Wende mit 200 gon in einem Zug, Endpunkt auf 1 mm genau',
         !t200.run.fail && hyp(e2.x - 20, e2.y - 2 * o2.rFront) < 0.001 && Math.abs(e2.h - Math.PI) < 1e-6,
-        'Querversatz 2R = ' + (2 * o2.rFront).toFixed(2) + ' m');
+        'Querversatz der Leitlinie 2R = ' + (2 * o2.rFront).toFixed(2) + ' m (nicht der Platzbedarf, der ist etwa der Wendekreis ⌀ ' + (2 * veh2.rOuter).toFixed(2) + ' m)');
       // The center of the arc is at (20, rFront). In the middle of the turn, the outer front corner is on the turning circle.
       let outerT = 0, dT = 0;
       for (const q of t200.run.smp) {

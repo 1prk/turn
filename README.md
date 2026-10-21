@@ -32,8 +32,7 @@ Schleppkurvenschablonen für **Richtungsänderungswinkel von 40 bis 200 gon** an
   standardmäßig der Wendekreis (voller Einschlag, Fahrweise 1). Ein größerer Radius ist im Feld „m“ einstellbar. Ein
   kleinerer Radius als der Wendekreis geht nicht. Die Kurve beginnt am Ende der Fahrlinie. Die Maus links oder rechts
   vom Fahrzeug wählt die Drehrichtung, ein Klick setzt die Kurve (Quadrat). Danach läuft eine Gerade tangential heraus.
-  **Taste W** wählt direkt eine Wende mit 200 gon in einem Zug. Eine Wende braucht mindestens 2 · R Platz in der Breite
-  (PKW 9,07 m, LKW 15,38 m).
+  **Taste W** wählt direkt eine Wende mit 200 gon in einem Zug. Siehe „Leitlinie, Querversatz und Platzbedarf“ unten.
 - **Bogen durch Punkt (B):** ein Kreisbogen vom Ende der Fahrlinie durch den Punkt an der Maus (Raute). Der Radius ergibt
   sich aus der Geometrie. Liegt der Punkt gegenüber, entsteht ein Halbkreis. Liegt er hinten seitlich, dreht das
   Fahrzeug mehr als 200 gon. Liegt der Punkt innerhalb des Mindestwendekreises, wird er auf den kleinsten möglichen Bogen
@@ -41,7 +40,8 @@ Schleppkurvenschablonen für **Richtungsänderungswinkel von 40 bis 200 gon** an
 - **Gerade nach Bogen oder Kurve:** Sie führt tangential geradeaus heraus. Punkte daneben werden auf diese Linie gelegt.
 
 Beim Wenden mit 200 gon und Mindestradius liegt der Außenradius der Karosserie genau auf dem Wendekreis (im Selbsttest:
-PKW 5,85 m, LKW 9,45 m bei 9,46 m).
+PKW 5,85 m, LKW 9,45 m bei 9,46 m). Der Platzbedarf ist deshalb etwa der Wendekreisdurchmesser, nicht der Querversatz der
+Leitlinie 2R.
 
 ## Tastenkürzel
 | Taste | Funktion |
@@ -106,7 +106,8 @@ Ecken der vorderen und den hinteren Ecken der hinteren Karosserie.
   63,0 gon (56,7°). Ein Grenzwert von 45° wäre dafür zu klein. Bitte den echten Wert eintragen.
 - Eine Fahrkurve, die den Grenzwert überschreitet, ist nicht möglich: Die Vorschau wird begrenzt, bestehende Punkte
   werden bei zu kleinem Grenzwert als ungültig markiert.
-- Die Wende in einem Zug (Taste W) braucht beim Gelenkbus mindestens 2 · R = 17,13 m Platz in der Breite.
+- Die Wende in einem Zug (Taste W) hat beim Gelenkbus einen Querversatz der Leitlinie von 2 · R = 17,13 m. Der Platzbedarf
+  ist etwa der Wendekreisdurchmesser 22,80 m (siehe „Leitlinie, Querversatz und Platzbedarf“).
 - Eigene Gelenkfahrzeuge: Fahrzeug kopieren (+), Haken „Gelenkfahrzeug“, Maße eintragen.
 
 ## Bewegungsspielraum
@@ -203,6 +204,28 @@ Version auf welche (ein Klick blendet ihn aus). Daten aus der Zeit vor der Versi
 die damaligen Werte in `Sim.PRESET_HISTORY`, damit auch dort Änderungen erkannt werden. Der Button „Voreinstellung
 wiederherstellen“ setzt alle Felder zurück. Beim Ändern einer Voreinstellung im Code: `PRESET_VERSION` erhöhen.
 
+## Leitlinie, Querversatz und Platzbedarf
+**Die Leitlinie ist der Weg der Mitte der Vorderachse**, nicht der Weg der Karosserie. Alle Punkte, Geraden und Bögen der
+Fahrlinie beziehen sich darauf (Start = Vorderachsmitte, „Radius“ einer Kurve = Radius der Vorderachsmitte). Die Karosserie
+liegt je nach Kurve innen und außen davon (siehe Hüllkurven).
+
+Bei einer **Wende in einem Zug** (200 gon, Taste W) mit Mindestradius R der Vorderachsmitte endet die Leitlinie um
+**2 · R seitlich versetzt** vom Start. Dieser **Querversatz 2R ist nur der Versatz der Leitlinie, nicht der Platzbedarf.**
+Der Platzbedarf einer Wende ist etwa der **Wendekreisdurchmesser 2 · R<sub>außen</sub>**, weil die äußerste Karosserieecke
+auf dem Wendekreis läuft (Selbsttest: Außenradius = Wendekreis). Zum Vergleich:
+
+| Fahrzeug | Querversatz der Leitlinie 2R | Platzbedarf etwa Wendekreis-⌀ 2 · R<sub>außen</sub> |
+|---|---|---|
+| PKW | 9,07 m | 11,70 m |
+| LKW | 15,38 m | 18,92 m |
+| Müllfahrzeug 3-achsig | 16,63 m | 20,50 m |
+| Müllfahrzeug 3-achsig Nachlaufachse | 13,54 m | 17,20 m |
+| Gelenkbus 3-achsig (18 m) | 17,13 m | 22,80 m |
+| Sattelzug 16,50 m (Platzhalter) | 21,57 m | 25,00 m |
+
+Die Anwendung zeigt beides: Die Fahrzeuginfo und das Ergebnis nennen den Wendekreis-⌀, und bei einem Bogen ab 150 gon steht
+der Querversatz der Leitlinie ausdrücklich als „nur die Leitlinie“ dabei.
+
 ## Schleppkurve und Leitlinie
 Die Vorderräder werden auf der Leitlinie geführt. Sie besteht aus Geraden und Kreisbögen, an denen ein Punkt des
 Fahrzeugs (hier die Vorderachsmitte) entlangfährt. Die Hinterachse läuft zwangsgeführt auf einer nach innen
@@ -235,7 +258,7 @@ Länge 4,88 m · Radstand 2,86 m · Überhang vorn 0,92 m / hinten 1,10 m · Bre
 Wendekreisradius außen 5,85 m (äußerste Karosserieecke bei Vollausschlag) → max. Lenkwinkel ≈ 43,4 gon.
 
 ## Modell
-Kinematisches Einspurmodell, die Hinterachse folgt zwangsgeführt. Nur Vorwärtsfahrt. Der Button „Kinematik prüfen“ führt Selbsttests aus
+Kinematisches Einspurmodell, die Hinterachse folgt zwangsgeführt. Nur Vorwärtsfahrt. Die Leitlinie ist die Vorderachsmitte. Der Button „Kinematik prüfen“ führt Selbsttests aus
 (Kreisfahrt, Wendekreis, innere Hüllkurve, Nachlaufachse, Sattelzug, Vektor-Export, Versionen der Voreinstellungen, Geradeausfahrt, Maßstab, Fahrweise 1: Tangentialität, Mindestradius, Radius wächst mit Abstand, Zielpunkt-Begrenzung, LKW); auch per `node -e "console.log(require('./js/sim.js').selfTest().filter(r => !r.ok))"` (leere Liste = alles bestanden).
 
 ## Aufbau

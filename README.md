@@ -68,13 +68,30 @@ Voreinstellungen (Maße in m, Überhang hinten und Radstand beziehen sich bei me
 | PKW | 4,88 | 2,86 | 0,92 | 1,10 | 1,89 | 5,85 | 43,4 gon |
 | LKW | 9,22 | 5,17 | 1,36 | 2,69 | 2,30 | 9,46 | 46,9 gon |
 | Müllfahrzeug 3-achsig | 9,90 | 4,77 | 1,53 | 3,60 | 2,55 | 10,25 | 38,9 gon |
-| Müllfahrzeug 3-achsig Nachlaufachse | 9,95 | 3,90 | 1,35 | 4,70 | 2,55 | 8,60 | 39,1 gon |
+| Müllfahrzeug 3-achsig Nachlaufachse (*) | 9,95 | 4,575 | 1,35 | 4,025 | 2,55 | 8,60 | 39,1 gon |
 | Gelenkbus 3-achsig (18 m) | 18,00 | 5,90 | 2,70 | 9,40 (ab Mittelachse) | 2,55 | 11,40 | 48,4 gon |
 
 Die Fahrzeuge mit drei Achsen werden mit drei Achsen gezeichnet. Die Hinterachse im Modell ist die Mitte der beiden
-hinteren Achsen. Der **Abstand der Hinterachsen** (1,35 m) ist eine Annahme und wirkt nur auf die Darstellung, nicht
-auf die Berechnung. Bei der Nachlaufachse lenkt die hinterste Achse in der Darstellung gegen. Die Berechnung benutzt
-nur Radstand, Überhänge, Breite und Wendekreis. Spurweite und Lenkübersetzung sind ebenfalls Annahmen (Darstellung).
+hinteren Achsen. Der **Abstand der Hinterachsen** (1,35 m) ist eine Annahme. Er wirkt nur auf die Darstellung, außer bei
+einer Nachlaufachse (siehe unten). Spurweite und Lenkübersetzung sind ebenfalls Annahmen (Darstellung).
+
+### Nachlaufachse (Nachlauflenkachse)
+Bei einer gelenkten Nachlaufachse lenkt die hinterste Achse gegen die Vorderachse mit. Sie hält den Momentanpol nicht
+fest. Der Momentanpol liegt auf der Linie der **festen** Achse, das ist die vordere der beiden Hinterachsen. Das Modell
+rechnet deshalb mit dem **wirksamen Radstand** `Radstand − Achsabstand/2` und dem wirksamen Hinterüberhang
+`Überhang + Achsabstand/2` (Hilfsfunktion `Sim.modelGeom`, die gespeicherten Fahrzeugdaten bleiben unverändert). Bei
+gleichem Lenkeinschlag wird die Kurve dadurch enger und das Heck schwenkt weiter aus. Lenkwinkel-Limit, Fahrsimulation,
+Karosserie, Hüllkurven und Zeichnung benutzen alle dieselbe wirksame Geometrie. Die Räder der Nachlaufachse stehen
+senkrecht zur Linie zum Momentanpol auf der Linie der festen Achse.
+
+(*) **Annahme, bitte prüfen:** Die Werte der Voreinstellung (Radstand 3,90 m bis zur festen Hinterachse, 4,70 m von dort
+bis zum Ende) waren schon in der alten Version die Modellwerte. Gespeichert wird jetzt, wie bei allen Fahrzeugen, auf die
+Mitte der beiden Hinterachsen bezogen (3,90 + 1,35/2 = 4,575 m und 4,70 − 1,35/2 = 4,025 m). Das Verhalten dieser
+Voreinstellung ist deshalb unverändert (max. Lenkwinkel 39,1 gon, Heck innerhalb des Wendekreises 8,60 m). Wäre 3,90 m
+dagegen bis zur Mitte der beiden Hinterachsen gemessen, wäre der wirksame Radstand 3,225 m. Dann schwenkt die Heckecke
+bei Vollausschlag bis 9,05 m aus, das ist mehr als der Wendekreis 8,60 m: Die Maße und der Wendekreis würden nicht
+zusammenpassen. Der Selbsttest prüft für jede Voreinstellung, dass der äußerste Karosseriepunkt bei Vollausschlag auf dem
+Wendekreis liegt.
 
 ## Gelenkfahrzeuge (Gelenkbus)
 Ein Fahrzeug mit Haken „Gelenkfahrzeug“ hat zwei Karosserien. Die vordere Karosserie ist das Fahrzeug wie bisher
@@ -129,7 +146,7 @@ Wendekreisradius außen 5,85 m (äußerste Karosserieecke bei Vollausschlag) →
 
 ## Modell
 Kinematisches Einspurmodell, die Hinterachse folgt zwangsgeführt. Nur Vorwärtsfahrt. Der Button „Kinematik prüfen“ führt Selbsttests aus
-(Kreisfahrt, Wendekreis, innere Hüllkurve, Geradeausfahrt, Maßstab, Fahrweise 1: Tangentialität, Mindestradius, Radius wächst mit Abstand, Zielpunkt-Begrenzung, LKW); auch per `node -e "console.log(require('./js/sim.js').selfTest().filter(r => !r.ok))"` (leere Liste = alles bestanden).
+(Kreisfahrt, Wendekreis, innere Hüllkurve, Nachlaufachse, Geradeausfahrt, Maßstab, Fahrweise 1: Tangentialität, Mindestradius, Radius wächst mit Abstand, Zielpunkt-Begrenzung, LKW); auch per `node -e "console.log(require('./js/sim.js').selfTest().filter(r => !r.ok))"` (leere Liste = alles bestanden).
 
 ## Aufbau
 - `index.html` – Oberfläche

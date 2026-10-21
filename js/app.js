@@ -240,12 +240,19 @@
     const A = { smp: smp, sweep: new Path2D(), sat: new Path2D(), front: new Path2D(),
                 rear: new Path2D(), trails: new Path2D(), sil: new Path2D(),
                 maxD: 0, maxPhi: 0, satLen: 0, turn: 0, length: smp[smp.length - 1].s };
-    const trail = [[], [], [], []];
+    // The envelope lines (meters). Each traced point has its own line. A line of a side point at a rigid axle is only
+    // an envelope line on the inner side of the turn. On the outer side, the body covers it. A line breaks where this changes.
+    const info = Sim.trailInfo(v), env = [], pen = [];
     const silStep = Math.max(0.5, parseFloat($('silStep').value) || 2);
     let nextSil = 0;
     smp.forEach((p, i) => {
       const polys = Sim.bodyPolys(p, v);                    // An articulated vehicle has three polygons.
-      Sim.trailPoints(p, v).forEach((c, k) => trail[k].push(c));
+      Sim.trailPoints(p, v).forEach((c, k) => {
+        const t = info[k].kind === 'side' ? Sim.turnSide(smp, i, info[k].body) : 0;
+        if (t !== 0 && t !== info[k].side) { pen[k] = null; return; }
+        if (!pen[k]) { pen[k] = []; env.push(pen[k]); }
+        pen[k].push(c);
+      });
       if (i % 2 === 0 || i === smp.length - 1) polys.forEach((poly) => addPoly(A.sweep, poly));
       if (p.s >= nextSil) { polys.forEach((poly) => addPoly(A.sil, poly)); nextSil += silStep; }
       A.maxD = Math.max(A.maxD, Math.abs(p.d));
@@ -256,7 +263,8 @@
         A.sat.moveTo(smp[i - 1].Fx, smp[i - 1].Fy); A.sat.lineTo(p.Fx, p.Fy);
       }
     });
-    trail.forEach((t) => polyline(A.trails, t));
+    env.forEach((t) => polyline(A.trails, t));
+    A.env = env;
     polyline(A.front, smp.map((p) => ({ x: p.Fx, y: p.Fy })));
     polyline(A.rear, smp.map((p) => ({ x: p.Rx, y: p.Ry })));
     return A;

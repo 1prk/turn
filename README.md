@@ -99,8 +99,16 @@ die Fahrkurve. Die Fahrkurven werden nicht im Browser gespeichert, weil sie vom 
 ## Schleppkurve und Leitlinie
 Die Vorderräder werden auf der Leitlinie geführt. Sie besteht aus Geraden und Kreisbögen, an denen ein Punkt des
 Fahrzeugs (hier die Vorderachsmitte) entlangfährt. Die Hinterachse läuft zwangsgeführt auf einer nach innen
-nachlaufenden Schleppkurve. Das ergibt die sichelförmige Verbreiterung der überstrichenen Fläche. Hüllkurven sind die
-Spuren der vier Karosserieecken.
+nachlaufenden Schleppkurve. Das ergibt die sichelförmige Verbreiterung der überstrichenen Fläche.
+
+**Hüllkurven:** Die äußere Hüllkurve ist die Spur der Karosserieecken. Die **innere** Hüllkurve ist es nicht: Der
+innerste Punkt einer starren Karosserieseite ist der Fußpunkt des Lots vom Momentanpol auf diese Seite. Weil der
+Momentanpol immer auf der Linie der starren Achse liegt (dort rollt das Rad ohne Querschlupf), liegt dieser Punkt
+immer **auf Höhe der starren Achse**, nicht an einer Ecke. Die Anwendung zeichnet deshalb zusätzlich die Spuren der
+beiden Seitenpunkte an der starren Achse jeder starren Karosserie (bei Gelenkfahrzeugen an beiden Karosserien).
+Gezeichnet wird nur die Spur auf der Kurveninnenseite, auf der Außenseite würde sie quer durch die überstrichene
+Fläche laufen. Die gefüllte Hüllfläche war schon vorher richtig (Vereinigung der Karosserieflächen), nur die Linien
+waren innen falsch.
 
 ## Fahrweise 1
 Der Lenkradeinschlag erfolgt während der Fahrt. Geraden und Kreisbögen schließen tangential aneinander an, an den
@@ -121,7 +129,7 @@ Wendekreisradius außen 5,85 m (äußerste Karosserieecke bei Vollausschlag) →
 
 ## Modell
 Kinematisches Einspurmodell, die Hinterachse folgt zwangsgeführt. Nur Vorwärtsfahrt. Der Button „Kinematik prüfen“ führt Selbsttests aus
-(Kreisfahrt, Wendekreis, Geradeausfahrt, Maßstab, Fahrweise 1: Tangentialität, Mindestradius, Radius wächst mit Abstand, Zielpunkt-Begrenzung, LKW); auch per `node -e "require('./js/sim.js').selfTest()"`.
+(Kreisfahrt, Wendekreis, innere Hüllkurve, Geradeausfahrt, Maßstab, Fahrweise 1: Tangentialität, Mindestradius, Radius wächst mit Abstand, Zielpunkt-Begrenzung, LKW); auch per `node -e "console.log(require('./js/sim.js').selfTest().filter(r => !r.ok))"` (leere Liste = alles bestanden).
 
 ## Aufbau
 - `index.html` – Oberfläche

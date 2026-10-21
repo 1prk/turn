@@ -15,8 +15,10 @@
    * wb is the distance from the front axle to the center between the two rear axles.
    * The rear overhang starts at this center.
    * track = track width. The program uses it only to draw the wheels.
-   * gap = distance between the two rear axles. The program uses it only to draw the axles. 0 = one rear axle.
-   * trail = true when the rearmost axle is steered (trailing steered axle). The program uses it only to draw the wheels.
+   * gap = distance between the two rear axles. 0 = one rear axle. The program uses it to draw the axles.
+   * With a trailing steered axle (trail), it also changes the calculation (see Sim.modelGeom).
+   * trail = true when the rearmost axle is steered (trailing steered axle). Then the front rear axle is the rigid axle.
+   * The center of rotation is on its line. The model uses wb - gap/2 as the wheelbase and rear + gap/2 as the rear overhang.
    * artic = true for an articulated vehicle (a bus with a joint). Then hitch, axle2, rearOver and knickGon are used:
    * hitch = distance from the middle axle to the joint, axle2 = distance from the joint to the rear axle,
    * rearOver = overhang behind the rear axle, knickGon = largest articulation angle in gon.
@@ -25,7 +27,13 @@
     { name: 'PKW', wb: 2.86, front: 0.92, rear: 1.10, width: 1.89, rOuter: 5.85, track: 1.60, ratio: 13, gap: 0, trail: false, preset: true },
     { name: 'LKW', wb: 5.17, front: 1.36, rear: 2.69, width: 2.30, rOuter: 9.46, track: 1.90, ratio: 20, gap: 0, trail: false, preset: true },
     { name: 'Müllfahrzeug 3-achsig', wb: 4.77, front: 1.53, rear: 3.60, width: 2.55, rOuter: 10.25, track: 2.00, ratio: 20, gap: 1.35, trail: false, preset: true },
-    { name: 'Müllfahrzeug 3-achsig Nachlaufachse', wb: 3.90, front: 1.35, rear: 4.70, width: 2.55, rOuter: 8.60, track: 2.00, ratio: 20, gap: 1.35, trail: true, preset: true },
+    // The values 3.90 m (front axle to the rigid rear axle) and 4.70 m (rigid rear axle to the end) are the values that the model
+    // used before the trailing axle changed the kinematics. They are the effective wheelbase and the effective rear overhang.
+    // The stored wb and rear are measured from the center of the two rear axles, like for all vehicles.
+    // So wb = 3.90 + gap/2 and rear = 4.70 - gap/2, and Sim.modelGeom gives back 3.90 m and 4.70 m. The behavior of this preset is the same as before.
+    // ASSUMPTION, please verify: if 3.90 m was measured to the center of the rear axles, the effective wheelbase would be 3.225 m.
+    // Then at full lock the rear corner swings out to 9.05 m. This is more than rOuter 8.60 m, so rOuter and the dimensions would not fit together.
+    { name: 'Müllfahrzeug 3-achsig Nachlaufachse', wb: 4.575, front: 1.35, rear: 4.025, width: 2.55, rOuter: 8.60, track: 2.00, ratio: 20, gap: 1.35, trail: true, preset: true },
     // An articulated bus with three axles (the dimensions of the drawing): the front axle, the middle axle and the rear axle.
     // The middle axle is the rear axle of the model. rear = hitch + axle2 + rearOver is the distance from the middle axle to the end.
     // knickGon = the largest articulation angle. The value is not from the maker. It is a little more than the angle that the turning circle needs.
@@ -34,16 +42,38 @@
   ];
   Sim.DEFAULT_VEHICLE = Object.assign({}, Sim.PRESETS[0]);
 
+  /* The geometry that the model uses for a vehicle. The stored vehicle data do not change.
+   * The model rear axle is the rigid axle. The center of rotation (ICR) of the vehicle is on the line of this axle.
+   * Normally this is the center of the rear axles. With a trailing steered axle (trail and gap > 0), the rearmost axle
+   * steers. It does not hold the ICR. Then the rigid axle is the front rear axle. It is gap/2 in front of the center.
+   * The wheelbase is shorter and the rear overhang is longer, so the turn is tighter and the rear swings out more.
+   * An articulated vehicle does not use trail.
+   * Return { wb, rear, shift }: the wheelbase and the rear overhang, both measured from the model rear axle,
+   * and the distance from the center of the rear axles to the model rear axle (0 or gap/2). */
+  Sim.modelGeom = function (v) {
+    const g = v.trail && v.gap > 0 && !v.artic ? v.gap / 2 : 0;
+    return { wb: v.wb - g, rear: v.rear + g, shift: g };
+  };
+
+  /* The steering angle of the trailing steered axle (radians) for the steering angle d of the front axle.
+   * The trailing axle is gap behind the rigid rear axle. The center of rotation is on the line of the rigid axle,
+   * at the lateral distance wb / tan(d). The wheels of the trailing axle are perpendicular to the line to this point.
+   * The angle is against the steering angle of the front axle. Return 0 if the vehicle has no trailing axle. */
+  Sim.trailAngle = function (v, d) {
+    const m = Sim.modelGeom(v);
+    return m.shift > 0 ? -Math.atan(v.gap * Math.tan(d) / m.wb) : 0;
+  };
+
   /* Calculate the maximum steering angle from the turning circle.
    * At full lock, the outer front corner is on the circle with the radius rOuter.
-   * The center of this circle is on the line of the rear axle. */
+   * The center of this circle is on the line of the model rear axle (see Sim.modelGeom). */
   Sim.steerLimit = function (v) {
-    const reach = v.wb + v.front;
+    const wb = Sim.modelGeom(v).wb, reach = wb + v.front;
     const d = v.rOuter * v.rOuter - reach * reach;
     if (d <= 0) return null;
     const rRear = Math.sqrt(d) - v.width / 2;
     if (rRear <= 0) return null;
-    return { delta: Math.atan(v.wb / rRear), rRear: rRear, rFront: hyp(rRear, v.wb) };
+    return { delta: Math.atan(wb / rRear), rRear: rRear, rFront: hyp(rRear, wb) };
   };
 
   function mix(a, b, ta, tb, t) {
@@ -131,9 +161,9 @@
   };
 
   /* The center of the front axle follows the path.
-   * The rear axle follows, because the wheelbase is rigid.
+   * The rear axle follows, because the wheelbase is rigid. The rear axle is the model rear axle (see Sim.modelGeom).
    * Each result has these values:
-   * s = distance along the path, F = front axle, R = rear axle,
+   * s = distance along the path, F = front axle, R = model rear axle,
    * th = vehicle angle, d = steering angle (path tangent minus vehicle angle).
    * An articulated vehicle (v.artic) has more values, see Sim.addRearBody. */
   Sim.run = function (path, v) {
@@ -144,7 +174,7 @@
       const a = path[Math.max(0, i - 1)], b = path[Math.min(n - 1, i + 1)];
       tan.push(Math.atan2(b.y - a.y, b.x - a.x));
     }
-    const out = [];
+    const out = [], wb = Sim.modelGeom(v).wb;
     let Rx, Ry, th, s = 0;
     for (let i = 0; i < n; i++) {
       const F = path[i];
@@ -153,13 +183,13 @@
       } else {
         s += hyp(F.x - path[i - 1].x, F.y - path[i - 1].y);
         // The rear axle follows the front axle. The distance |F - R| stays equal to the wheelbase.
-        const r = Sim.pursue(Rx, Ry, th, F.x, F.y, v.wb);
+        const r = Sim.pursue(Rx, Ry, th, F.x, F.y, wb);
         th = r.th; Rx = r.x; Ry = r.y;
         out.push({ s: s, Fx: F.x, Fy: F.y, Rx: Rx, Ry: Ry, th: th, d: normAngle(tan[i] - th) });
         continue;
       }
-      Rx = F.x - v.wb * Math.cos(th);
-      Ry = F.y - v.wb * Math.sin(th);
+      Rx = F.x - wb * Math.cos(th);
+      Ry = F.y - wb * Math.sin(th);
       out.push({ s: s, Fx: F.x, Fy: F.y, Rx: Rx, Ry: Ry, th: th, d: normAngle(tan[i] - th) });
     }
     if (v.artic) Sim.addRearBody(out, v);
@@ -188,12 +218,14 @@
   };
 
   Sim.sample = function (v, Rx, Ry, th, d, s) {
-    return { s: s, Rx: Rx, Ry: Ry, th: th, d: d, Fx: Rx + v.wb * Math.cos(th), Fy: Ry + v.wb * Math.sin(th) };
+    const wb = Sim.modelGeom(v).wb;
+    return { s: s, Rx: Rx, Ry: Ry, th: th, d: d, Fx: Rx + wb * Math.cos(th), Fy: Ry + wb * Math.sin(th) };
   };
 
   /* Start state. The center of the front axle is at F. The vehicle points in the direction th. */
   Sim.startState = function (v, F, th) {
-    return Sim.sample(v, F.x - v.wb * Math.cos(th), F.y - v.wb * Math.sin(th), th, 0, 0);
+    const wb = Sim.modelGeom(v).wb;
+    return Sim.sample(v, F.x - wb * Math.cos(th), F.y - wb * Math.sin(th), th, 0, 0);
   };
 
   /* Limits for the drive simulation. Return null if the vehicle data are not valid.
@@ -488,10 +520,10 @@
     return { x: smp.Rx + x * c - y * sn, y: smp.Ry + x * sn + y * c };
   };
 
-  /* Body polygon. Corner order: front left, front right, rear right, rear left. */
+  /* Body polygon. Corner order: front left, front right, rear right, rear left. The origin is the model rear axle. */
   Sim.bodyPoly = function (smp, v) {
     // An articulated vehicle: this is the front body. It ends at the joint.
-    const hw = v.width / 2, xf = v.wb + v.front, xr = v.artic ? -v.hitch : -v.rear;
+    const m = Sim.modelGeom(v), hw = v.width / 2, xf = m.wb + v.front, xr = v.artic ? -v.hitch : -m.rear;
     return [Sim.local(smp, xf, -hw), Sim.local(smp, xf, hw), Sim.local(smp, xr, hw), Sim.local(smp, xr, -hw)];
   };
 
@@ -592,18 +624,47 @@
       const r2 = Sim.run(c2, veh2).slice(Math.floor(n2 * 0.8));
       const rh2 = hyp(lim2.rRear, veh2.artic ? veh2.hitch : 0), hw2 = veh2.width / 2;
       const expect = Math.min(lim2.rRear, veh2.artic ? Math.sqrt(rh2 * rh2 - veh2.axle2 * veh2.axle2) : Infinity) - hw2;
-      let minSide = Infinity, minCorner = Infinity, minEdge = Infinity;
+      let minSide = Infinity, minCorner = Infinity, minEdge = Infinity, maxPoint = 0;
       for (const q of r2) {
         const tp = Sim.trailPoints(q, veh2);
         tp.forEach((c, k) => { if (k < 4) minCorner = Math.min(minCorner, hyp(c.x, c.y)); else minSide = Math.min(minSide, hyp(c.x, c.y)); });
         for (const poly of Sim.bodyPolys(q, veh2)) {
-          for (let k = 0; k < poly.length; k++) minEdge = Math.min(minEdge, segDist(0, 0, poly[k], poly[(k + 1) % poly.length]));
+          for (let k = 0; k < poly.length; k++) {
+            minEdge = Math.min(minEdge, segDist(0, 0, poly[k], poly[(k + 1) % poly.length]));
+            maxPoint = Math.max(maxPoint, hyp(poly[k].x, poly[k].y));
+          }
         }
       }
       add(veh2.name + ': innere Hüllkurve = Achsradius − halbe Breite (' + expect.toFixed(2) + ' m)', Math.abs(minSide - expect) < 0.01,
         'Seitenpunkte ' + minSide.toFixed(3) + ' m, nur Ecken ' + minCorner.toFixed(3) + ' m');
       add(veh2.name + ': kein Punkt der Karosseriekanten liegt weiter innen', minEdge >= expect - 0.001, 'kleinster Abstand der Kanten ' + minEdge.toFixed(3) + ' m');
+      // The turning circle rOuter must fit to the dimensions. At full lock, the outermost point of all bodies is at rOuter.
+      add(veh2.name + ': Vollausschlag: äußerster Punkt aller Karosserien = Wendekreis ' + veh2.rOuter + ' m', Math.abs(maxPoint - veh2.rOuter) < 0.02,
+        'gemessen ' + maxPoint.toFixed(3) + ' m');
     }
+
+
+    // Trailing steered axle. The rigid axle is the front rear axle. The ICR is on its line.
+    // The stored data stay the same. In steady state, the radius of the rigid axle is sqrt(rFront^2 - wbEff^2).
+    const tr = Sim.PRESETS.find((p) => p.trail && p.gap > 0), trWb0 = tr.wb, trRear0 = tr.rear, mg = Sim.modelGeom(tr), limT = Sim.steerLimit(tr);
+    add('Nachlaufachse: Modellgeometrie = Radstand − Achsabstand/2, Überhang + Achsabstand/2, Daten unverändert',
+      Math.abs(mg.wb - (tr.wb - tr.gap / 2)) < 1e-12 && Math.abs(mg.rear - (tr.rear + tr.gap / 2)) < 1e-12 && tr.wb === trWb0 && tr.rear === trRear0 &&
+      Sim.modelGeom(v).wb === v.wb && Sim.modelGeom(Object.assign({}, tr, { trail: false })).wb === tr.wb,
+      'wb ' + tr.wb + ' → ' + mg.wb.toFixed(3) + ' m, Überhang ' + tr.rear + ' → ' + mg.rear.toFixed(3) + ' m');
+    const nT = Math.round(2 * 2 * Math.PI * limT.rFront / 0.05), cT = [];
+    for (let i = 0; i <= nT; i++) { const a = i * 0.05 / limT.rFront; cT.push({ x: limT.rFront * Math.cos(a), y: limT.rFront * Math.sin(a) }); }
+    const runT = Sim.run(cT, tr).slice(Math.floor(nT * 0.75)), rEff = Math.sqrt(limT.rFront * limT.rFront - mg.wb * mg.wb);
+    let devT = 0;
+    for (const q of runT) devT = Math.max(devT, Math.abs(hyp(q.Rx, q.Ry) - rEff));
+    add('Nachlaufachse: Radius der festen Hinterachse = √(R² − Radstand_eff²) (' + rEff.toFixed(2) + ' m)', devT < 0.01,
+      'max. Abweichung ' + (devT * 1000).toFixed(1) + ' mm, ohne Nachlaufachse wären es ' + Math.sqrt(limT.rFront * limT.rFront - tr.wb * tr.wb).toFixed(2) + ' m');
+    // The trailing axle is perpendicular to the line to the ICR on the line of the rigid axle.
+    let perpErr = 0;
+    for (const dd of [-0.6, -0.3, 0.2, 0.5]) {
+      const a = Sim.trailAngle(tr, dd), yI = mg.wb / Math.tan(dd);                // The ICR is at (0, yI). The trailing axle is at (-gap, 0).
+      perpErr = Math.max(perpErr, Math.abs(Math.cos(a) * tr.gap + Math.sin(a) * yI));        // The wheel direction (cos a, sin a) is perpendicular to (gap, yI).
+    }
+    add('Nachlaufachse: Räder stehen senkrecht zur Linie zum Momentanpol der festen Achse', perpErr < 1e-9 && Sim.trailAngle(v, 0.3) === 0, 'Fehler ' + perpErr.toExponential(1));
 
     const line = [];
     for (let i = 0; i <= 400; i++) line.push({ x: i * 0.05, y: 0 });

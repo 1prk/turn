@@ -416,14 +416,15 @@
     ctx.restore();
   }
 
-  /* Draw the vehicle v at the sample p. The origin is the center of the rear axles.
-   * A vehicle with gap > 0 has two rear axles at the distance gap/2 in front of and behind this center.
-   * The front wheels have the steering angle p.d. If the vehicle has a trailing steered axle, the rearmost
-   * axle steers against the front axle. Its wheels are perpendicular to the line to the center of the turn. */
+  /* Draw the vehicle v at the sample p. The origin is the model rear axle (see Sim.modelGeom).
+   * A vehicle with gap > 0 has two rear axles. Normally they are at the distance gap/2 in front of and behind the center
+   * of the rear axles, and this center is the origin. With a trailing steered axle, the front rear axle is the rigid axle
+   * and the origin. The trailing axle is the distance gap behind it. It steers against the front axle.
+   * The front wheels have the steering angle p.d. */
   function drawVehicle(p, um, alpha, v, color) {
     v = v || veh;
     color = color || '#0b3d91';
-    const L = v.front + v.wb + v.rear, hw = v.width / 2;
+    const m = Sim.modelGeom(v), L = v.front + m.wb + m.rear, hw = v.width / 2;
     const wl = v.width > 2.2 ? 1.0 : 0.65, ww = v.width > 2.2 ? 0.30 : 0.22;       // A truck has larger wheels.
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -439,23 +440,23 @@
       });
     }
     ctx.translate(p.Rx, p.Ry); ctx.rotate(p.th);
-    if (!v.artic) { ctx.fillRect(-v.rear, -hw, L, v.width); ctx.strokeRect(-v.rear, -hw, L, v.width); }
+    if (!v.artic) { ctx.fillRect(-m.rear, -hw, L, v.width); ctx.strokeRect(-m.rear, -hw, L, v.width); }
     ctx.fillStyle = '#222';
     const wheel = (x, y, a) => {
       ctx.save(); ctx.translate(x, y); ctx.rotate(a); ctx.fillRect(-wl / 2, -ww / 2, wl, ww); ctx.restore();
     };
     const t = v.track / 2, g = v.gap > 0 && !v.artic ? v.gap / 2 : 0;
-    const rear = g > 0 ? [-g, g] : [0];                                          // The x positions of the rear axles.
-    const trailAngle = v.trail && g > 0 ? -Math.atan(g * Math.tan(p.d) / v.wb) : 0;
+    const rear = g > 0 ? (m.shift > 0 ? [-v.gap, 0] : [-g, g]) : [0];           // The x positions of the rear axles.
+    const trailAngle = Sim.trailAngle(v, p.d);
     rear.forEach((x) => {
       const a = x < 0 ? trailAngle : 0;
       wheel(x, -t, a); wheel(x, t, a);
     });
-    wheel(v.wb, -t, p.d); wheel(v.wb, t, p.d);
+    wheel(m.wb, -t, p.d); wheel(m.wb, t, p.d);
     ctx.strokeStyle = color; ctx.lineWidth = um;     // The axles and the arrow of the direction.
     ctx.beginPath();
-    rear.concat([v.wb]).forEach((x) => { ctx.moveTo(x, -t); ctx.lineTo(x, t); });
-    const xf = v.wb + v.front;
+    rear.concat([m.wb]).forEach((x) => { ctx.moveTo(x, -t); ctx.lineTo(x, t); });
+    const xf = m.wb + v.front;
     ctx.moveTo(xf - 0.5, -0.25); ctx.lineTo(xf - 0.1, 0); ctx.lineTo(xf - 0.5, 0.25);
     if (v.artic) {                                   // The joint is a circle.
       ctx.moveTo(-v.hitch + 0.25, 0); ctx.arc(-v.hitch, 0, 0.25, 0, 7);
@@ -880,7 +881,7 @@
     }
     refreshFields(); saveVehicles(); recompute();
   });
-  $('v_trail').addEventListener('change', () => { veh.trail = $('v_trail').checked; saveVehicles(); requestDraw(); });
+  $('v_trail').addEventListener('change', () => { veh.trail = $('v_trail').checked; saveVehicles(); recompute(); });      // The trailing axle changes the kinematics.
 
   /* ---------- list of driving lines ---------- */
   function renderRoutes() {

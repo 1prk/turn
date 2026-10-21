@@ -238,7 +238,7 @@
   /* Make the drawing paths (in meters) and the numbers for a list of samples. */
   function analyse(smp, lim, v) {
     v = v || veh;
-    const A = { smp: smp, sweep: new Path2D(), sat: new Path2D(), front: new Path2D(),
+    const A = { smp: smp, sweep: new Path2D(), band: new Path2D(), sat: new Path2D(), front: new Path2D(),
                 rear: new Path2D(), trails: new Path2D(), sil: new Path2D(),
                 maxD: 0, maxPhi: 0, satLen: 0, turn: 0, length: smp[smp.length - 1].s };
     // The envelope lines (meters). Each traced point has its own line. A line of a side point at a rigid axle is only
@@ -255,6 +255,8 @@
         pen[k].push(c);
       });
       if (i % 2 === 0 || i === smp.length - 1) polys.forEach((poly) => addPoly(A.sweep, poly));
+      if (i % 4 === 0 || i === smp.length - 1) polys.forEach((poly) => addPoly(A.band, poly));      // The band is a stroke: it needs fewer polygons.
+
       if (p.s >= nextSil) { polys.forEach((poly) => addPoly(A.sil, poly)); nextSil += silStep; }
       A.maxD = Math.max(A.maxD, Math.abs(p.d));
       if (v.artic) A.maxPhi = Math.max(A.maxPhi, Math.abs(p.phi));
@@ -399,14 +401,45 @@
     }
   }
 
+  /* The clearance (Bewegungsspielraum) around the swept area, in meters. 0 = off. */
+  function clearance() {
+    const c = parseFloat(String($('clearM').value).replace(',', '.'));
+    return $('oClear').checked && c > 0 ? Math.min(5, c) : 0;
+  }
+
+  /* Draw the band of the clearance below the swept area. The swept area (fill and stroke of 2 * clearance with round joins)
+   * is drawn opaque on an offscreen canvas. Then the canvas is drawn with transparency. So the edges of the inner strokes
+   * and the overlaps of the polygons do not show through. The offscreen canvas is reused while nothing changes.
+   * The path A.band has every 4th polygon. The stroke is the slow part, and the width of the band hides the gaps (less than 7 cm). */
+  const clearCache = { cv: null, path: null, zoom: 0, ox: 0, oy: 0, w: 0, h: 0, c: 0, mpp: 0 };
+  function drawClearance(A, color, c) {
+    const dpr = window.devicePixelRatio || 1, w = cv.width, h = cv.height, cc = clearCache;
+    if (!cc.cv) cc.cv = document.createElement('canvas');
+    if (cc.path !== A.band || cc.zoom !== S.zoom || cc.ox !== S.ox || cc.oy !== S.oy || cc.w !== w || cc.h !== h || cc.c !== c || cc.mpp !== S.mpp || cc.color !== color) {
+      cc.cv.width = w; cc.cv.height = h;           // This also clears the canvas.
+      const o = cc.cv.getContext('2d');
+      o.setTransform(dpr * S.zoom, 0, 0, dpr * S.zoom, dpr * S.ox, dpr * S.oy);
+      o.scale(1 / S.mpp, 1 / S.mpp);
+      o.fillStyle = color; o.strokeStyle = color; o.lineWidth = 2 * c; o.lineJoin = 'round'; o.lineCap = 'round';
+      o.fill(A.band); o.stroke(A.band);
+      Object.assign(cc, { path: A.band, zoom: S.zoom, ox: S.ox, oy: S.oy, w: w, h: h, c: c, mpp: S.mpp, color: color });
+    }
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 0.2;
+    ctx.drawImage(cc.cv, 0, 0);
+    ctx.restore();
+  }
+
   function drawResult(px) {
     const R = S.res, P = S.prev;
     if (!R && !P) return;
     const k = 1 / S.mpp, um = px * S.mpp;        // k changes meters to pt. um is one pixel in meters.
+    // If there is a preview, it shows the whole route. If not, the fixed route is shown.
+    const A = P || R, ok = P ? (P.ok && !P.clamped) : !R.fail, clear = clearance();
+    if (clear > 0) drawClearance(A, ok ? (P ? '#16a34a' : '#2872e0') : '#d94614', clear);
     ctx.save();
     ctx.scale(k, k);
-    // If there is a preview, it shows the whole route. If not, the fixed route is shown.
-    const A = P || R, ok = P ? (P.ok && !P.clamped) : !R.fail;
     if ($('oSweep').checked) { ctx.fillStyle = ok ? (P ? 'rgba(22,163,74,.20)' : 'rgba(40,110,220,.22)') : 'rgba(217,70,20,.25)'; ctx.fill(A.sweep); }
     ctx.lineWidth = um; ctx.strokeStyle = ok ? (P ? 'rgba(21,128,61,.9)' : 'rgba(20,70,170,.9)') : 'rgba(194,65,12,.9)'; ctx.stroke(A.trails);
     if ($('oSil').checked) { ctx.strokeStyle = 'rgba(30,40,60,.5)'; ctx.stroke(A.sil); }
@@ -801,7 +834,8 @@
   $('driveReset').addEventListener('click', () => { S.start = null; S.pend = null; S.wps = []; recompute(); });
   $('driveUndo').addEventListener('click', () => { if (S.start) removeWp(); });
   $('fit').addEventListener('click', fitView);
-  ['oSweep', 'oSil'].forEach((id) => $(id).addEventListener('change', requestDraw));
+  ['oSweep', 'oSil', 'oClear'].forEach((id) => $(id).addEventListener('change', requestDraw));
+  $('clearM').addEventListener('input', requestDraw);
   $('silStep').addEventListener('change', recompute);
 
   /* ---------- vehicle list ---------- */

@@ -15,7 +15,8 @@ Browserbasierte Prüfung von Schleppkurven auf einem PDF-Lageplan. Kein Server, 
    (Rechtsklick löscht, Rückschritt nimmt den letzten zurück). Ein Ziehen, das die Linie unfahrbar machen würde,
    springt zurück. Wird eine bestehende Linie durch einen Fahrzeugwechsel unfahrbar, wird nur der fahrbare Teil
    gezeichnet, die übrigen Punkte sind rot markiert.
-4. Ergebnis: Hüllfläche, Eckspuren, Silhouetten, Lenkrad-Anzeige. Fahrzeug per Regler oder „Abspielen“ bewegen.
+4. Ergebnis: Hüllfläche, Hüllkurven, Silhouetten, Lenkrad-Anzeige, auf Wunsch der Bewegungsspielraum. Fahrzeug per
+   Regler oder „Abspielen“ bewegen.
 
 **Alle Winkel in der Oberfläche sind in gon** (400 gon = Vollkreis, 100 gon = rechter Winkel): Lenkwinkel, Limit,
 Lenkrad, Drehung der Bögen, Richtungsänderung.
@@ -107,6 +108,19 @@ Ecken der vorderen und den hinteren Ecken der hinteren Karosserie.
   werden bei zu kleinem Grenzwert als ungültig markiert.
 - Die Wende in einem Zug (Taste W) braucht beim Gelenkbus mindestens 2 · R = 17,13 m Platz in der Breite.
 - Eigene Gelenkfahrzeuge: Fahrzeug kopieren (+), Haken „Gelenkfahrzeug“, Maße eintragen.
+
+## Bewegungsspielraum
+Die Schablonen der RBSV zeigen einen Bewegungsspielraum von 0,50 m um die überstrichene Fläche. Der Haken
+**Bewegungsspielraum** in Abschnitt 5 zeigt ihn als helles Band um die Hüllfläche der gewählten Fahrkurve. Das Feld
+daneben stellt die Breite ein (Voreinstellung **0,50 m**, **0,25 m** ist möglich). Das Band gehört zur gewählten Fahrkurve
+und zur Live-Vorschau, nicht zu den abgeblendeten anderen Fahrkurven. Es ist im PNG-Export und im Vektor-Export enthalten.
+Die Quellen widersprechen sich, ob die Schablonen 30 cm oder 50 cm enthalten (siehe
+[docs/recherche-schleppkurven.md](docs/recherche-schleppkurven.md)). Die RBSV 2020 selbst wurde nicht gelesen.
+
+Technik: Die überstrichene Fläche wird gefüllt und mit der Linienbreite `2 · Spielraum` (runde Ecken) gestrichen, und zwar
+**deckend auf einer Offscreen-Zeichenfläche**. Erst diese Fläche wird mit Transparenz unter die Hüllfläche gezeichnet. So
+scheinen die Innenkanten der Striche und die Überlappungen der Polygone nicht durch. Für das Band reicht jede 4. Silhouette
+(Lücken unter 7 cm, vom Band überdeckt), denn das Streichen ist der langsame Teil.
 
 ## Sattelzug (Sattelkupplung)
 Der Sattelzug ist das maßgebende Fahrzeug an Knotenpunkten. Mathematisch ist er der Gelenkbus mit **negativem Hitch**: Der

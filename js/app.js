@@ -65,9 +65,17 @@
 
   /* ---------- driving lines ---------- */
   // Each driving line has its own points and its own vehicle. The line that the user edits is the active line.
-  const ROUTE_COLORS = [null, '#ea580c', '#9333ea', '#0d9488', '#db2777', '#65a30d'];      // The active line has the standard colors.
-  function newRoute(name, fw) { return { name: name, veh: veh, start: null, wps: [], pos: 1, res: null, valid: 0, fw: fw === 2 ? 2 : 1 }; }
-  S.routes = [newRoute('Fahrkurve 1')];
+  // The colors of the driving lines. Each line has its own color (the user can choose it). A new line gets the first color that no line uses.
+  const PALETTE = ['#2563eb', '#ea580c', '#9333ea', '#0d9488', '#db2777', '#65a30d', '#ca8a04', '#dc2626'];
+  const WARN = '#d94614';       // The color of a line that the vehicle cannot drive, and of a preview that is limited.
+  const hexRgb = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+  const rgba = (h, a) => { const c = hexRgb(h); return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; };
+  const shade = (h, f) => '#' + hexRgb(h).map((x) => Math.round(x * (1 - f)).toString(16).padStart(2, '0')).join('');      // Mix with black (f = 0 .. 1).
+  function nextColor() { const used = S.routes.map((r) => r.color); return PALETTE.find((c) => !used.includes(c)) || PALETTE[S.routes.length % PALETTE.length]; }
+  function newRoute(name, fw) {
+    return { name: name, veh: veh, start: null, wps: [], pos: 1, res: null, valid: 0, fw: fw === 2 ? 2 : 1, color: nextColor(), sil: Sim.SIL_DEFAULT() };
+  }
+  S.routes = []; S.routes = [newRoute('Fahrkurve 1')];
 
   /* ---------- view helpers ---------- */
   const s2p = (x, y) => ({ x: (x - S.ox) / S.zoom, y: (y - S.oy) / S.zoom });
@@ -98,7 +106,7 @@
     S.exported = false; S.note = null;
     S.start = null; S.pend = null; S.wps = []; S.prev = null;
     S.pos = 1; S.playing = false;
-    S.routes = [newRoute('Fahrkurve 1')]; S.ri = 0; S.fw = 1;
+    S.routes = []; S.routes = [newRoute('Fahrkurve 1')]; S.ri = 0; S.fw = 1;
     $('pos').value = 1000;
     renderRoutes();
   }
@@ -274,16 +282,13 @@
   function analyse(smp, lim, v) {
     v = v || veh;
     const A = { smp: smp, sweep: new Path2D(), band: new Path2D(), sat: new Path2D(), front: new Path2D(),
-                rear: new Path2D(), trails: new Path2D(), sil: new Path2D(),
+                rear: new Path2D(), trails: new Path2D(),
                 maxD: 0, maxPhi: 0, satLen: 0, turn: 0, length: smp[smp.length - 1].s };
-    const silStep = Math.max(0.5, parseFloat($('silStep').value) || 2);
-    let nextSil = 0;
     smp.forEach((p, i) => {
       const polys = Sim.bodyPolys(p, v);                    // An articulated vehicle has three polygons.
       if (i % 2 === 0 || i === smp.length - 1) polys.forEach((poly) => addPoly(A.sweep, poly));
       if (i % 4 === 0 || i === smp.length - 1) polys.forEach((poly) => addPoly(A.band, poly));      // The band is a stroke: it needs fewer polygons.
 
-      if (p.s >= nextSil) { polys.forEach((poly) => addPoly(A.sil, poly)); nextSil += silStep; }
       A.maxD = Math.max(A.maxD, Math.abs(p.d));
       if (v.artic) A.maxPhi = Math.max(A.maxPhi, Math.abs(p.phi));
       if (i > 0) A.turn += Math.atan2(Math.sin(p.th - smp[i - 1].th), Math.cos(p.th - smp[i - 1].th));    // The change of direction.
@@ -632,24 +637,100 @@
     ctx.restore();
   }
 
+  /* The boundary of a swept path: a dark ring with a white ring around it, outside of the swept area. The inner envelope lines are not part of it.
+   * The area is grown by the width of the rings (fill and stroke with round joins, like the clearance band) on an offscreen canvas.
+   * Then the swept area itself is cut out of it. The canvas is kept for a line while nothing changes. */
+  const ringCache = new WeakMap();
+  function ringCanvas(A, dark, t, c) {
+    const dpr = window.devicePixelRatio || 1, w = cv.width, h = cv.height;
+    let rc = ringCache.get(A);
+    if (!rc) { rc = { cv: document.createElement('canvas'), key: '' }; ringCache.set(A, rc); }
+    const key = [S.zoom, S.ox, S.oy, w, h, S.mpp, dark, t, c].join();
+    if (rc.key !== key) {
+      rc.cv.width = w; rc.cv.height = h;           // This also clears the canvas.
+      const o = rc.cv.getContext('2d'), um = S.mpp / S.zoom;      // One screen pixel in meters.
+      o.setTransform(dpr * S.zoom, 0, 0, dpr * S.zoom, dpr * S.ox, dpr * S.oy);
+      o.scale(1 / S.mpp, 1 / S.mpp);
+      o.lineJoin = 'round'; o.lineCap = 'round';
+      const grow = (width, color) => { o.fillStyle = color; o.strokeStyle = color; o.lineWidth = 2 * width; o.fill(A.band); o.stroke(A.band); };
+      grow((t + c) * um, 'rgba(255,255,255,.95)');
+      grow(t * um, dark);
+      o.globalCompositeOperation = 'destination-out'; o.fillStyle = '#000'; o.fill(A.sweep);
+      rc.key = key;
+    }
+    return rc.cv;
+  }
+
+  /* The index of the sample at the distance s along the path (the samples are sorted by s). */
+  function sampleAt(smp, s) {
+    let lo = 0, hi = smp.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (smp[mid].s < s) lo = mid + 1; else hi = mid; }
+    return lo > 0 && s - smp[lo - 1].s < smp[lo].s - s ? lo - 1 : lo;
+  }
+
+  /* An arrow on the guide line (meters). */
+  function drawArrow(x, y, a, size) {
+    const c = Math.cos(a), sn = Math.sin(a);
+    ctx.beginPath();
+    ctx.moveTo(x + size * c, y + size * sn);
+    ctx.lineTo(x - 0.7 * size * c + 0.6 * size * sn, y - 0.7 * size * sn - 0.6 * size * c);
+    ctx.lineTo(x - 0.7 * size * c - 0.6 * size * sn, y - 0.7 * size * sn + 0.6 * size * c);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  /* Draw the swept path of one driving line with high contrast. The context is in plan units. The function scales it to meters.
+   * The layers: the fill (color of the line), the boundary (white casing and a dark line), the silhouettes (the vehicle, with a white halo),
+   * the guide line (white casing, black line and arrows), the places where the steering is at the stop, and the vehicle at its position.
+   * A = the paths and the samples of the line.
+   * o = { color, warn, veh, sil (the settings of the silhouettes or null), pos (the sample of the vehicle or null), posAlpha, fw, fillAlpha }. */
+  function paintRoute(A, o, px) {
+    const um = px * S.mpp, dark = shade(o.color, 0.5), n = A.smp.length;
+    ctx.save();
+    ctx.scale(1 / S.mpp, 1 / S.mpp);
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    if ($('oSweep').checked) { ctx.fillStyle = rgba(o.color, o.fillAlpha); ctx.fill(A.sweep); }
+    if (o.cheap) {          // A preview changes with each move of the mouse. It gets a simple boundary.
+      ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = 5 * um; ctx.stroke(A.trails);
+      ctx.strokeStyle = dark; ctx.lineWidth = 2.2 * um; ctx.stroke(A.trails);
+    } else {
+      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(ringCanvas(A, dark, 2.6, 1.8), 0, 0); ctx.restore();      // The boundary of the swept area.
+      ctx.strokeStyle = rgba(dark, 0.7); ctx.lineWidth = 1.1 * um; ctx.stroke(A.trails);                                      // The envelope lines inside.
+    }
+    if ($('oRear').checked) { ctx.strokeStyle = '#4b5563'; ctx.lineWidth = um; ctx.setLineDash([4 * um, 3 * um]); ctx.stroke(A.rear); ctx.setLineDash([]); }
+    if (o.sil) {
+      const m = Sim.modelGeom(o.veh), vl = o.veh.front + m.wb + m.rear;
+      Sim.silhouettes(A.length, vl, o.sil).forEach((s) => drawVehicle(A.smp[sampleAt(A.smp, s)], um, 1, o.veh, dark, true));
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = 6 * um; ctx.stroke(A.front);          // The guide line.
+    ctx.strokeStyle = o.warn ? '#c2410c' : '#0a0a0a'; ctx.lineWidth = 2.8 * um; ctx.stroke(A.front);
+    ctx.fillStyle = o.warn ? '#c2410c' : '#0a0a0a';
+    let next = 6;
+    for (let i = 1; i < n - 1; i++) {
+      if (A.smp[i].s < next) continue;
+      next += 12;
+      const a = Math.atan2(A.smp[i + 1].Fy - A.smp[i - 1].Fy, A.smp[i + 1].Fx - A.smp[i - 1].Fx);
+      ctx.save(); ctx.lineWidth = 1.6 * um; ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.beginPath();
+      const c = Math.cos(a), sn = Math.sin(a), x = A.smp[i].Fx, y = A.smp[i].Fy, sz = 8 * um;
+      ctx.moveTo(x + sz * c, y + sz * sn); ctx.lineTo(x - 0.7 * sz * c + 0.6 * sz * sn, y - 0.7 * sz * sn - 0.6 * sz * c); ctx.lineTo(x - 0.7 * sz * c - 0.6 * sz * sn, y - 0.7 * sz * sn + 0.6 * sz * c);
+      ctx.closePath(); ctx.stroke(); ctx.restore();
+      drawArrow(x, y, a, sz);
+    }
+    if (o.fw === 1) { ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 3.4 * um; ctx.stroke(A.sat); }   // The steering is at the stop. In style 2 this is the normal case.
+    if (o.pos) drawVehicle(o.pos, um, o.posAlpha, o.veh, dark, true);
+    ctx.restore();
+  }
+
   function drawResult(px) {
     const R = S.res, P = S.prev;
     if (!R && !P) return;
-    const k = 1 / S.mpp, um = px * S.mpp;        // k changes meters to pt. um is one pixel in meters.
+    const um = px * S.mpp, r = S.routes[S.ri];
     // If there is a preview, it shows the whole route. If not, the fixed route is shown.
     const A = P || R, ok = P ? (P.ok && !P.clamped) : !R.fail, clear = clearance();
-    if (clear > 0) drawClearance(A, ok ? (P ? '#16a34a' : '#2872e0') : '#d94614', clear);
-    ctx.save();
-    ctx.scale(k, k);
-    if ($('oSweep').checked) { ctx.fillStyle = ok ? (P ? 'rgba(22,163,74,.20)' : 'rgba(40,110,220,.22)') : 'rgba(217,70,20,.25)'; ctx.fill(A.sweep); }
-    ctx.lineWidth = um; ctx.strokeStyle = ok ? (P ? 'rgba(21,128,61,.9)' : 'rgba(20,70,170,.9)') : 'rgba(194,65,12,.9)'; ctx.stroke(A.trails);
-    if ($('oSil').checked) { ctx.strokeStyle = 'rgba(30,40,60,.5)'; ctx.stroke(A.sil); }
-    if ($('oRear').checked) { ctx.strokeStyle = '#6b7280'; ctx.setLineDash([4 * um, 3 * um]); ctx.stroke(A.rear); }
-    ctx.strokeStyle = ok ? '#111' : '#c2410c'; ctx.lineWidth = 1.5 * um; ctx.setLineDash([]); ctx.stroke(A.front);
-    if (S.fw === 1) { ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 4 * um; ctx.stroke(A.sat); }   // The steering is at the stop. In style 2 this is the normal case.
-    drawVehicle(P ? P.end : R.smp[sampleIndex()], um, P ? 0.75 : 1);
-    if ($('oIcr').checked && S.step >= 4) drawIcr(P ? P.end : R.smp[sampleIndex()], um);
-    ctx.restore();
+    const col = P ? (ok ? '#16a34a' : WARN) : (ok ? r.color : WARN), q = P ? P.end : R.smp[sampleIndex()];
+    if (clear > 0) drawClearance(A, col, clear);
+    paintRoute(A, { color: col, warn: !ok, veh: veh, sil: P ? null : r.sil, pos: q, posAlpha: P ? 0.75 : 1, fw: S.fw, fillAlpha: 0.3, cheap: !!P }, px);
+    if ($('oIcr').checked && S.step >= 4) { ctx.save(); ctx.scale(1 / S.mpp, 1 / S.mpp); drawIcr(q, um); ctx.restore(); }
   }
 
   /* Debug: the center of rotation (ICR) of the front body. It is on the line of the model rear axle, at the distance wb / tan(d). */
@@ -670,14 +751,15 @@
    * of the rear axles, and this center is the origin. With a trailing steered axle, the front rear axle is the rigid axle
    * and the origin. The trailing axle is the distance gap behind it. It steers against the front axle.
    * The front wheels have the steering angle p.d. */
-  function drawVehicle(p, um, alpha, v, color) {
+  function drawVehicle(p, um, alpha, v, color, halo) {
     v = v || veh;
     color = color || '#0b3d91';
     const m = Sim.modelGeom(v), L = v.front + m.wb + m.rear, hw = v.width / 2;
     const wl = v.width > 2.2 ? 1.0 : 0.65, ww = v.width > 2.2 ? 0.30 : 0.22;       // A truck has larger wheels.
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.strokeStyle = color; ctx.lineWidth = 1.5 * um;
+    ctx.fillStyle = halo ? 'rgba(255,255,255,.88)' : 'rgba(255,255,255,.75)'; ctx.strokeStyle = color; ctx.lineWidth = (halo ? 2 : 1.5) * um;
+    ctx.lineJoin = 'round';
     if (v.artic) {
       // The front body, the bellows (dark, only a bus) and the rear body. A semitrailer has the tractor and the trailer. The polygons are in the plan frame.
       Sim.bodyPolys(p, v).forEach((poly, i) => {
@@ -685,11 +767,16 @@
         poly.forEach((c, k) => (k ? ctx.lineTo(c.x, c.y) : ctx.moveTo(c.x, c.y)));
         ctx.closePath();
         ctx.fillStyle = i === 1 && v.kind !== 'semi' ? 'rgba(70,70,70,.55)' : 'rgba(255,255,255,.75)';
-        ctx.fill(); ctx.stroke();
+        ctx.fill();
+        if (halo) { ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = 5 * um; ctx.stroke(); ctx.restore(); }
+        ctx.stroke();
       });
     }
     ctx.translate(p.Rx, p.Ry); ctx.rotate(p.th);
-    if (!v.artic) { ctx.fillRect(-m.rear, -hw, L, v.width); ctx.strokeRect(-m.rear, -hw, L, v.width); }
+    if (!v.artic) {
+      if (halo) { ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = 5 * um; ctx.strokeRect(-m.rear, -hw, L, v.width); ctx.restore(); }
+      ctx.fillRect(-m.rear, -hw, L, v.width); ctx.strokeRect(-m.rear, -hw, L, v.width);
+    }
     ctx.fillStyle = '#222';
     const wheel = (x, y, a) => {
       ctx.save(); ctx.translate(x, y); ctx.rotate(a); ctx.fillRect(-wl / 2, -ww / 2, wl, ww); ctx.restore();
@@ -726,22 +813,14 @@
     }
   }
 
-  /* Draw the driving lines that are not active. They are weaker than the active line.
-   * Each line has its own color and its own vehicle. */
+  /* Draw the driving lines that are not active. Each line has its own color, its own vehicle and its own silhouettes. */
   function drawOthers(px) {
     if (!S.mpp) return;
-    const k = 1 / S.mpp, um = px * S.mpp;
     S.routes.forEach((r, i) => {
       if (i === S.ri || !r.res) return;
-      const col = ROUTE_COLORS[i % ROUTE_COLORS.length] || '#0b3d91';
-      ctx.save();
-      ctx.scale(k, k);
-      ctx.globalAlpha = 0.28; ctx.fillStyle = col; ctx.fill(r.res.sweep);
-      ctx.globalAlpha = 0.9; ctx.lineWidth = um; ctx.strokeStyle = col; ctx.stroke(r.res.trails);
-      ctx.lineWidth = 1.5 * um; ctx.stroke(r.res.front);
-      drawVehicle(r.res.smp[Math.round(r.pos * (r.res.smp.length - 1))], um, 0.8, r.veh, col);
-      ctx.restore();
-      ctx.fillStyle = col; ctx.font = 12 * px + 'px system-ui,sans-serif';       // The name at the start point.
+      paintRoute(r.res, { color: r.res.fail ? WARN : r.color, warn: !!r.res.fail, veh: r.veh, sil: r.sil,
+        pos: r.res.smp[Math.round(r.pos * (r.res.smp.length - 1))], posAlpha: 0.9, fw: r.fw, fillAlpha: 0.24 }, px);
+      ctx.fillStyle = shade(r.color, 0.4); ctx.font = 'bold ' + 12 * px + 'px system-ui,sans-serif';       // The name at the start point.
       ctx.fillText(r.name, r.start.p.x + 8 * px, r.start.p.y - 8 * px);
       ctx.beginPath(); ctx.arc(r.start.p.x, r.start.p.y, 4 * px, 0, 7); ctx.fill();
     });
@@ -1065,9 +1144,8 @@
   $('driveReset').addEventListener('click', () => { S.start = null; S.pend = null; S.wps = []; recompute(); });
   $('driveUndo').addEventListener('click', () => { if (S.start) removeWp(); });
   $('fit').addEventListener('click', fitView);
-  ['oSweep', 'oSil', 'oClear', 'oIcr', 'oRear', 'oHud'].forEach((id) => $(id).addEventListener('change', requestDraw));
+  ['oSweep', 'oClear', 'oIcr', 'oRear', 'oHud'].forEach((id) => $(id).addEventListener('change', requestDraw));
   $('clearM').addEventListener('input', requestDraw);
-  $('silStep').addEventListener('change', recompute);
 
   /* ---------- vehicle list ---------- */
   // A small top view of the vehicle for its card. The length of the drawing follows the length of the vehicle.
@@ -1205,8 +1283,7 @@
       b.className = 'chip' + (i === S.ri ? ' on' : '');
       b.textContent = r.name + ' · ' + r.veh.name + (r.fw === 2 ? ' · FW 2' : '');
       b.title = 'Fahrkurve wählen';
-      const col = ROUTE_COLORS[i % ROUTE_COLORS.length];
-      if (col && i !== S.ri) b.style.borderLeft = '5px solid ' + col;
+      b.style.borderLeft = '7px solid ' + r.color;
       b.addEventListener('click', () => selectRoute(i));
       box.appendChild(b);
     });
@@ -1217,7 +1294,28 @@
     $('routeDel').style.display = S.routes.length > 1 ? '' : 'none';
     updateGuide();
     if ($('r_name').value !== S.routes[S.ri].name) $('r_name').value = S.routes[S.ri].name;      // Do not move the cursor while the user types.
+    syncRouteControls();
   }
+
+  /* The color and the silhouette settings of the active driving line are shown in the controls (not in a field that the user types in). */
+  function syncRouteControls() {
+    const r = S.routes[S.ri], g = r.sil, set = (id, v) => { if (document.activeElement !== $(id)) $(id).value = v; };
+    set('r_color', r.color); set('r_color2', r.color);
+    $('s_start').checked = g.start.on; set('s_startAt', g.start.at);
+    $('s_mid').checked = g.mid.on; set('s_midAt', g.mid.at == null ? '' : g.mid.at);
+    $('s_end').checked = g.end.on; set('s_endAt', g.end.at);
+    $('s_every').checked = g.every.on; set('s_everyStep', g.every.step);
+  }
+  function readSilControls() {
+    const g = S.routes[S.ri].sil, num = (id, d) => { const v = parseFloat(String($(id).value).replace(',', '.')); return isFinite(v) && v >= 0 ? v : d; };
+    g.start.on = $('s_start').checked; g.start.at = num('s_startAt', 0);
+    g.mid.on = $('s_mid').checked; g.mid.at = $('s_midAt').value === '' ? null : num('s_midAt', null);
+    g.end.on = $('s_end').checked; g.end.at = num('s_endAt', 0);
+    g.every.on = $('s_every').checked; g.every.step = num('s_everyStep', 25);
+    requestDraw();
+  }
+  ['s_start', 's_startAt', 's_mid', 's_midAt', 's_end', 's_endAt', 's_every', 's_everyStep'].forEach((id) => $(id).addEventListener(id.endsWith('At') || id.endsWith('Step') ? 'input' : 'change', readSilControls));
+  ['r_color', 'r_color2'].forEach((id) => $(id).addEventListener('input', () => { S.routes[S.ri].color = $(id).value; renderRoutes(); requestDraw(); }));
 
   /* Keep the working fields of the active line in its record. */
   function saveRoute() {
@@ -1247,7 +1345,7 @@
     if (!S.start) return;
     saveRoute();
     const src = S.routes[S.ri], fw = src.fw === 2 ? 1 : 2, r = newRoute(src.name + ' (Kopie)', fw);
-    r.veh = src.veh; r.start = { p: { x: src.start.p.x, y: src.start.p.y } }; r.wps = src.wps.map((w) => Object.assign({}, w));
+    r.veh = src.veh; r.sil = JSON.parse(JSON.stringify(src.sil)); r.start = { p: { x: src.start.p.x, y: src.start.p.y } }; r.wps = src.wps.map((w) => Object.assign({}, w));
     S.routes.push(r);
     selectRoute(S.routes.length - 1);
   }

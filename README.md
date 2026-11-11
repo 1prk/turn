@@ -26,7 +26,7 @@ Voraussetzung, sagt der Schritt, was fehlt, und bietet einen Button dorthin an. 
    sind rot markiert. Der Schalter „Fahrweise“ wählt Fahrweise 1 (Lenken während der Fahrt) oder 2 (Lenken im Stand, Knick).
    Mehrere Fahrkurven: Reiter oben im Schritt, **+** legt eine neue an. Unten im Plan stehen die
    Kennzahlen der Vorschau (Lenkwinkel, Radius, Weg, Anschlag). „Fahrlinie fertig“ führt zur Wiedergabe.
-5. **Wiedergabe & Export:** Abspielen und Regler, Anzeige (Hüllfläche, Silhouetten, Bewegungsspielraum), Ergebnis, Export
+5. **Wiedergabe & Export:** Abspielen und Regler, Anzeige (Hüllfläche, Farbe und Silhouetten je Fahrkurve, Bewegungsspielraum), Ergebnis, Export
    (PNG, DXF, SVG) und „weitere Fahrkurve anlegen“.
 6. **Debug (optional):** Selbsttest („Kinematik prüfen“, dauert etwa 10 s), Hilfslinien (Momentanpol, Spur der Hinterachse,
    Lenkrad-Anzeige) und die Werte an der Position des Fahrzeugs.
@@ -37,6 +37,20 @@ Plan stehen Zoom, Einpassen und „Letzten Punkt zurück“ als Buttons.
 
 **Alle Winkel in der Oberfläche sind in gon** (400 gon = Vollkreis, 100 gon = rechter Winkel): Lenkwinkel, Limit,
 Lenkrad, Drehung der Bögen, Richtungsänderung.
+
+## Farben und Silhouetten
+Jede Fahrkurve hat ihre **eigene Farbe** (Farbfeld neben dem Namen in Schritt 4 und in Schritt 5, die Reiter der Fahrkurven zeigen sie als farbigen Streifen).
+Neue Fahrkurven bekommen die erste Farbe der Palette, die noch keine Fahrkurve hat. Die Darstellung ist auf Kontrast ausgelegt:
+- **Hüllfläche:** Fläche in der Farbe der Fahrkurve (durchscheinend), **Begrenzung** als dunkler Ring in einer abgedunkelten Version der Farbe mit weißem Rand
+  außen, damit sie auf jedem Plan und neben jeder anderen Farbe zu sehen ist. Die inneren Hüllkurven bleiben dünn.
+- **Fahrlinie** (Mitte der Vorderachse): schwarz mit weißem Rand und Richtungspfeilen alle 12 m. Orange liegt darüber, wo die Lenkung am Anschlag ist.
+- **Silhouetten:** das Fahrzeug so, wie es gezeichnet wird (Karosserie, Achsen, Räder, Gelenk), mit weißem Rand und der abgedunkelten Farbe der Fahrkurve.
+  Sie sitzen auf **Start**, **Mitte** und **Ende** des Weges. Jede Marke lässt sich einzeln abschalten und verschieben: Start und Mitte mit dem Abstand vom Start
+  in m (leer bei der Mitte = Mitte des Weges), das Ende mit dem Abstand vor dem Ende. Dazu kommen Silhouetten **alle 25 m** (Voreinstellung, einstellbar), außer
+  wenn eine näher als eine halbe Fahrzeuglänge an einer eingeschalteten Marke liegt. Bei 57 m Weg ergibt das genau Start, Mitte und Ende. Sind alle vier Felder aus,
+  gibt es keine Silhouetten. Das Fahrzeug, das der Regler bewegt, bleibt.
+Die Einstellungen gelten je Fahrkurve und werden wie die Fahrkurven nicht im Browser gespeichert. Der Vektor-Export (DXF, SVG) hat seine festen Ebenen und Farben.
+Die Vorschau der nächsten Strecke bleibt grün (fahrbar) oder orangerot (begrenzt), damit sie sich von den festen Fahrkurven abhebt.
 
 ## Wende in einem Zug
 Die Recherche (siehe [docs/recherche-schleppkurven.md](docs/recherche-schleppkurven.md)) zeigt: Die RBSV 2020 gibt ihre

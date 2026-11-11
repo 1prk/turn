@@ -780,6 +780,35 @@
     return Math.atan(v.hitch / lim.rRear) + Math.asin(v.axle2 / rh);
   };
 
+  /* Where the silhouettes of a driving line are drawn.
+   * The silhouettes have three marks and an interval:
+   *   start = { on, at }: at is the distance from the start in meters (0 = at the start).
+   *   mid = { on, at }: at is the distance from the start in meters. null = the middle of the path.
+   *   end = { on, at }: at is the distance before the end in meters (0 = at the end).
+   *   every = { on, step }: a silhouette after each step meters (the first one after one step, never at the start).
+   * An interval silhouette is left out if it is closer than half a vehicle length to a mark that is on.
+   * So the default (all on, step 25 m) gives the start, the middle and the end for a short path, and more silhouettes for a long path.
+   * L = the length of the path, vehLen = the length of the vehicle (both in meters). Return the positions along the path (sorted, in meters). */
+  Sim.SIL_DEFAULT = function () {
+    return { start: { on: true, at: 0 }, mid: { on: true, at: null }, end: { on: true, at: 0 }, every: { on: true, step: 25 } };
+  };
+  Sim.silhouettes = function (L, vehLen, cfg) {
+    const c = cfg || Sim.SIL_DEFAULT(), clamp = (x) => Math.min(L, Math.max(0, x));
+    const num = (x, d) => (x === null || x === undefined || x === '' || !isFinite(+x) ? d : +x);
+    const marks = [];
+    if (c.start && c.start.on) marks.push(clamp(num(c.start.at, 0)));
+    if (c.mid && c.mid.on) marks.push(clamp(num(c.mid.at, L / 2)));
+    if (c.end && c.end.on) marks.push(clamp(L - num(c.end.at, 0)));
+    const out = marks.slice();
+    const step = c.every ? num(c.every.step, 0) : 0;
+    if (c.every && c.every.on && step >= 0.5) {
+      const gap = 0.5 * vehLen;
+      for (let s = step; s < L - 1e-9; s += step) if (!marks.some((m) => Math.abs(m - s) < gap)) out.push(s);
+    }
+    out.sort((a, b) => a - b);
+    return out.filter((s, i) => i === 0 || s - out[i - 1] > 0.05);      // Two marks at the same place give one silhouette.
+  };
+
   /* The largest articulation angle (radians) in a turn by angle with the minimum turning circle, from a straight line.
    * sweepGon = the change of direction in gon. The vehicle drives 20 m straight before the turn and 40 m after it.
    * Use it for a semitrailer combination. It has no steady-state articulation angle (Sim.articSteady is null):
@@ -1351,6 +1380,23 @@
       add(tp.n + ': Austrittslinien der Schablone (40 bis 200 gon) auf 0,25 m genau, keine Kurve begrenzt', mx <= 0.25 && !bad, 'größte Abweichung ' + mx.toFixed(2) + ' m');
       // The circle that the guide line of the template follows at full lock. It has the radius of the front axle at the stop.
       add(tp.n + ': Leitkreis der Schablone = Radius der Vorderachse am Anschlag', closeTo(lt.rFront, tp.rc, 0.15), 'Schablone ' + tp.rc.toFixed(2) + ' m, Modell ' + lt.rFront.toFixed(2) + ' m');
+    }
+
+    // ---- The silhouettes of a driving line (the marks start, middle and end, and the interval).
+    {
+      const sl = (L, cfg) => Sim.silhouettes(L, 16.5, cfg).map((x) => +x.toFixed(2)).join(' ');
+      const d = Sim.SIL_DEFAULT(), sub = (o) => Object.assign(Sim.SIL_DEFAULT(), o);
+      add('Silhouetten: Standard bei 57 m Weg = Start, Mitte, Ende (die Silhouetten nach 25 m und 50 m liegen zu nah daran)', sl(57, d) === '0 28.5 57', sl(57, d));
+      add('Silhouetten: Standard bei 120 m Weg = Start, Mitte, Ende und alle 25 m dazwischen', sl(120, d) === '0 25 50 60 75 100 120', sl(120, d));
+      add('Silhouetten: jede Marke lässt sich einzeln entfernen, ohne Marken und Intervall bleibt nichts',
+        sl(57, sub({ start: { on: false, at: 0 } })) === '28.5 57' && sl(57, sub({ mid: { on: false, at: null } })) === '0 25 57' && sl(57, sub({ end: { on: false, at: 0 } })) === '0 28.5 50' &&
+        sl(57, { start: { on: false }, mid: { on: false }, end: { on: false }, every: { on: false, step: 25 } }) === '', 'ohne Mitte: ' + sl(57, sub({ mid: { on: false, at: null } })) + ' | ohne Start: ' + sl(57, sub({ start: { on: false, at: 0 } })) + ' | ohne Ende: ' + sl(57, sub({ end: { on: false, at: 0 } })));
+      add('Silhouetten: Start, Mitte und Ende lassen sich verschieben (Ende: Abstand vor dem Ende), außerhalb des Weges wird begrenzt',
+        sl(57, sub({ start: { on: true, at: 5 }, mid: { on: true, at: 20 }, end: { on: true, at: 3 }, every: { on: false, step: 25 } })) === '5 20 54' &&
+        sl(57, sub({ start: { on: true, at: -4 }, end: { on: true, at: 99 }, mid: { on: false }, every: { on: false, step: 25 } })) === '0', sl(57, sub({ start: { on: true, at: 5 }, mid: { on: true, at: 20 }, end: { on: true, at: 3 }, every: { on: false, step: 25 } })));
+      add('Silhouetten: ein Intervall unter 0,5 m wird nicht beachtet, ein Intervall ohne Marken beginnt nach einem Schritt',
+        sl(100, sub({ every: { on: true, step: 0.2 } })) === sl(100, sub({ every: { on: false, step: 25 } })) &&
+        sl(100, { start: { on: false }, mid: { on: false }, end: { on: false }, every: { on: true, step: 30 } }) === '30 60 90', sl(100, { start: { on: false }, mid: { on: false }, end: { on: false }, every: { on: true, step: 30 } }));
     }
     return res;
   };

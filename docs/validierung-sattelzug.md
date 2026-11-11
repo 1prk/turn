@@ -45,7 +45,7 @@ Jetzt gilt für „Kurve nach Winkel“, wenn ein Fahrzeug Rampen hat:
 - Ein Fahrzeug kann statt der festen Längen eine **Tabelle** `rampTable` haben: Zeilen `[Richtungsänderung in gon, rampIn, rampOut]`.
   Zwischen den Zeilen wird interpoliert. Der Sattelzug hat eine Tabelle mit den neun Kurven der Schablone.
 - Die Rampen gelten nur für „Kurve nach Winkel“ (K, W), nicht für Ecken (G) und Bogen durch Punkt (B).
-- Die Rampen setzen voraus, dass das Fahrzeug am Anfang der Kurve gerade steht (wie nach einer Geraden).
+- Die Rampen setzen voraus, dass das Fahrzeug am Anfang der Kurve gerade steht. Das Programm nutzt sie nur, wenn die Kurve auf eine Gerade folgt. Nach einem Bogen oder einer Kurve fährt es einen einfachen Kreisbogen.
 
 **Erste Fassung:** Ein einziges Gesetz für alle Winkel (`rampOut` = 24 m bei 200 gon, kürzer mit dem Quadrat des Winkels) lag im Mittel
 0,42 m neben den blauen Linien der Schablone, bei 160 und 180 gon war die Austrittslinie bis 1,2 m falsch. Das war nicht genau genug.

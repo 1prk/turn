@@ -44,6 +44,9 @@ Hinterachse) hat zwei Körper ohne Faltenbalg und Lenkrampen: Bei „Kurve nach 
 Wegstrecke (Fahrweise 1: „lenkt stetig ein und aus“). Die Längen sind für den Sattelzug je Winkel (40 bis 200 gon) an die Schablone angepasst
 (Hüllkurve im Mittel 0,06 m neben den Linien der Schablone). Fahrzeuge mit `rampIn = rampOut = 0` fahren wie bisher einen Kreisbogen.
 Prüfung gegen die Schablone „Schleppkurve 4, Sattelzug“: [docs/validierung-sattelzug.md](docs/validierung-sattelzug.md).
+Das Müllfahrzeug 3-achsig, der Gelenkbus und der neue **Reisebus 12 m** (Voreinstellung 7) haben ebenfalls Rampentabellen, angepasst an ihre
+Schablonen (Hüllkurve im Mittel 0,02 bis 0,04 m neben den Linien): [docs/validierung-schablonen.md](docs/validierung-schablonen.md).
+Die Rampen gelten nur, wenn die Kurve auf eine Gerade folgt. Nach einem Bogen oder einer Kurve fährt das Programm einen einfachen Kreisbogen.
 
 Beim Wenden mit 200 gon und Mindestradius liegt der Außenradius der Karosserie genau auf dem Wendekreis (im Selbsttest:
 PKW 5,85 m, LKW 9,45 m bei 9,46 m).

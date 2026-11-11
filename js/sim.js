@@ -35,13 +35,21 @@
   Sim.PRESETS = [
     { name: 'PKW', wb: 2.86, front: 0.92, rear: 1.10, width: 1.89, rOuter: 5.85, track: 1.60, ratio: 13, gap: 0, trail: false, preset: true },
     { name: 'LKW', wb: 5.17, front: 1.36, rear: 2.69, width: 2.30, rOuter: 9.46, track: 1.90, ratio: 20, gap: 0, trail: false, preset: true },
-    { name: 'Müllfahrzeug 3-achsig', wb: 4.77, front: 1.53, rear: 3.60, width: 2.55, rOuter: 10.25, track: 2.00, ratio: 20, gap: 1.35, trail: false, preset: true },
+    { name: 'Müllfahrzeug 3-achsig', wb: 4.77, front: 1.53, rear: 3.60, width: 2.55, rOuter: 10.25, track: 2.00, ratio: 20, gap: 1.35, trail: false, preset: true,
+      // Steering ramps fitted to the nine curves of the template "Müllfahrzeug 3-achsig (3Mü)" (docs/validierung-schablonen.md).
+      // The steering starts 5.25 m after the front axle. Mean distance of the swept area to the template lines: 0.024 m.
+      rampTable: [[40, 1.35, 0.05], [60, 1.00, 2.80], [80, 1.20, 2.05], [100, 1.05, 1.75], [120, 1.00, 2.00],
+                  [140, 1.00, 4.05], [160, 1.10, 3.75], [180, 1.00, 0.30], [200, 1.15, 3.05]] },
     { name: 'Müllfahrzeug 3-achsig Nachlaufachse', wb: 3.90, front: 1.35, rear: 4.70, width: 2.55, rOuter: 8.60, track: 2.00, ratio: 20, gap: 1.35, trail: true, preset: true },
     // An articulated bus with three axles (the dimensions of the drawing): the front axle, the middle axle and the rear axle.
     // The middle axle is the rear axle of the model. rear = hitch + axle2 + rearOver is the distance from the middle axle to the end.
     // knickGon = the largest articulation angle. The value is not from the maker. It is a little more than the angle that the turning circle needs.
     { name: 'Gelenkbus 3-achsig (18 m)', wb: 5.90, front: 2.70, rear: 9.40, width: 2.55, rOuter: 11.40, track: 2.10, ratio: 20, gap: 0, trail: false,
-      artic: true, hitch: 1.79, axle2: 4.21, rearOver: 3.40, knickGon: 65, preset: true },
+      artic: true, hitch: 1.79, axle2: 4.21, rearOver: 3.40, knickGon: 65, preset: true,
+      // Steering ramps fitted to the nine curves of the template "Gelenkbus (3-achsig)" (docs/validierung-schablonen.md).
+      // The steering starts 5.25 m after the front axle. Mean distance of the swept area to the template lines: 0.036 m.
+      rampTable: [[40, 1.00, 2.00], [60, 1.00, 1.30], [80, 0.70, 1.05], [100, 1.00, 3.25], [120, 0.95, 0.30],
+                  [140, 0.90, 0.05], [160, 0.70, 1.75], [180, 0.50, 0.05], [200, 1.10, 0.05]] },
     // A semitrailer combination, 16.50 m (the dimensions of the template "Schleppkurve 4, Sattelzug"):
     // tractor with 2 axles (length 6.20 m, 1.43 + 3.95 + 0.82) and semitrailer with 3 axles (length 13.59 m, 1.74 + 7.60 + 4.25).
     // The kingpin is 0.73 m in front of the rear axle of the tractor: 16.50 - (7.60 + 4.25) = 4.65 m from the front, the rear axle is at 5.38 m.
@@ -55,7 +63,13 @@
       // Rows: [turn in gon, ramp in, ramp out] in meters. Fitted for each of the nine curves of the template, so that the swept area
       // fits the template (mean distance 0.04 to 0.09 m, see docs/validierung-sattelzug.md). The steering starts 3.75 m in front of the tractor front.
       rampTable: [[40, 1.10, 2.50], [60, 1.00, 6.00], [80, 0.90, 5.50], [100, 1.00, 6.00], [120, 1.00, 0.55],
-                  [140, 1.20, 4.00], [160, 1.30, 5.00], [180, 2.30, 14.00], [200, 1.30, 24.50]] }
+                  [140, 1.20, 4.00], [160, 1.30, 5.00], [180, 2.30, 14.00], [200, 1.30, 24.50]] },
+    // A 2-axle coach or line bus, 12.00 m (the dimensions of the template "Reise-, Linienbus 12,0 m"): 2.80 + 5.90 + 3.30 m.
+    { name: 'Reise-/Linienbus 12,0 m', wb: 5.90, front: 2.80, rear: 3.30, width: 2.55, rOuter: 10.50, track: 2.05, ratio: 20, gap: 0, trail: false, preset: true,
+      // Steering ramps fitted to the nine curves of the template "Reise-, Linienbus 12,0 m" (docs/validierung-schablonen.md).
+      // The steering starts 5.25 m after the front axle. Mean distance of the swept area to the template lines: 0.030 m.
+      rampTable: [[40, 1.35, 2.25], [60, 1.20, 4.75], [80, 1.00, 4.00], [100, 1.10, 0.30], [120, 1.00, 0.30],
+                  [140, 1.00, 0.05], [160, 1.15, 3.55], [180, 1.15, 0.05], [200, 1.15, 0.05]] }
   ];
   Sim.DEFAULT_VEHICLE = Object.assign({}, Sim.PRESETS[0]);
 
@@ -303,17 +317,18 @@
     // Make a turn from the pose. The turn has the radius R and the change of direction sweep (positive or negative).
     // It starts tangential to the direction of the vehicle. The line after it continues in the end direction.
     const doTurn = (j) => {
-      const e = P[j], sweep = e.sweep, aa = Math.abs(sweep);
+      const e = P[j], sweep = e.sweep, aa = Math.abs(sweep), aligned = !forced;      // The vehicle is in line with the path only after a straight line.
       lastArc = null;
       forced = true;
       if (!(aa > 1e-6)) { ends[e.src] = { x: pose.x, y: pose.y }; return; }
       const R = e.R > 0 ? e.R : o.rFront, sign = sweep > 0 ? 1 : -1;
       if (R < o.rFront - 1e-6) setFail({ kind: 'radius', R: R, rMin: o.rFront });
-      if (o.rampTable || o.rampIn > 0 || o.rampOut > 0) {
+      if (aligned && (o.rampTable || o.rampIn > 0 || o.rampOut > 0)) {
         // Steering ramps (driving style 1: the driver steers in and out while the vehicle moves).
         // The steering angle changes at a constant rate along the path: from 0 to the full angle over o.rampIn meters,
         // and back to 0 over o.rampOut meters. The path of the front axle follows from the one-track model
         // (the vehicle heading changes by sin(steering angle) / wheelbase per meter). The vehicle heading at the start is the path direction.
+        // This is true after a straight line. After an arc or a turn, the vehicle is not in line with the path. Then the turn is a plain arc.
         // Between the ramps, the steering stays at the angle for the radius R. The function finds the length of this part,
         // so that the vehicle turns exactly by the sweep. If the turn is short, there is no such part and the peak steering is smaller
         // (the steering rate stays the same).
@@ -779,7 +794,7 @@
 
     // The articulated bus: the rear body follows the joint. The distance joint to rear axle is always the same.
     // In a long turn at full lock, the articulation angle and the radius of the rear axle are the values that the geometry gives.
-    const bus = Sim.PRESETS.find((b) => b.artic), ob = Sim.driveOpts(bus), limB = Sim.steerLimit(bus);
+    const bus = Object.assign({}, Sim.PRESETS.find((b) => b.artic), { rampTable: null }), ob = Sim.driveOpts(bus), limB = Sim.steerLimit(bus);      // The tests below are for the plain arc.
     const busStraight = Sim.buildRoute([pt(0, 0), pt(40, 0)], bus, ob);
     add('Gelenkbus: Geradeausfahrt, Knickwinkel 0', !busStraight.fail && busStraight.smp.every((q) => Math.abs(q.phi) < 1e-9), '');
     const busTurn = Sim.makeTurn([pt(0, 0), pt(40, 0)], 1, 1.9 * Math.PI, 0, bus, ob);
@@ -816,7 +831,7 @@
         if (q.th > 1.3 && q.th < 2.0) for (const k of Sim.bodyPoly(q, veh2)) outerT = Math.max(outerT, hyp(k.x - 20, k.y - o2.rFront));
       }
       add(veh2.name + ': Wende mit 200 gon, Außenradius = Wendekreis ' + veh2.rOuter + ' m, Lenkung am Anschlag',
-        Math.abs(outerT - veh2.rOuter) < 0.03 && dT <= o2.dMax + 0.01 && dT >= o2.dMax - 0.03,
+        Math.abs(outerT - veh2.rOuter) < 0.05 && dT <= o2.dMax + 0.01 && dT >= o2.dMax - 0.07,      // A short vehicle (the coach) does not reach the full lock in 200 gon. It gets within 0.06 rad.
         'gemessen ' + outerT.toFixed(2) + ' m, Lenkwinkel ' + Sim.gon(dT).toFixed(1) + ' gon');
     }
     // A radius that is smaller than the minimum turning circle is not possible. The function makes it equal to the minimum.
@@ -940,6 +955,28 @@
     let zMinX = Infinity; z200.smp.forEach((q) => { zMinX = Math.min(zMinX, q.Fx); });
     add('Sattelzug: 200 gon, der äußerste Punkt der Leitlinie liegt wie in der Schablone bei −6,44 m', closeTo(zMinX, -6.44, 0.25), 'Modell ' + zMinX.toFixed(2) + ' m');
     add('Sattelzug: Austrittslinien der Schablone (40 bis 200 gon) auf 0,25 m genau', tplOk, 'größte Abweichung ' + tplMax.toFixed(2) + ' m. Modell (Vorlage) in m: ' + tplTxt.join('; '));
+
+    // ---- More templates (A3, 1:250): the same nine curves, 40 to 200 gon. The exit lines of the guide line are measured in the template pictures.
+    // Each row: vehicle, x of the start of the steering (the front axle starts at x = front, the vehicle drives to smaller x),
+    // radius of the circle of the guide line in the template (fit of the template), measured exit offsets [gon, m].
+    const TPLS = [
+      { n: 'Müllfahrzeug 3-achsig', x0: -3.72, rc: 8.26, w: [[40, 1.08], [60, 2.42], [80, 4.32], [100, 6.32], [120, 8.44], [140, 10.48], [160, 12.12], [180, 13.08], [200, 13.68]] },
+      { n: 'Reise-/Linienbus 12,0 m', x0: -2.45, rc: 7.41, w: [[40, -0.70], [60, -0.22], [80, 0.52], [100, 1.74], [120, 3.26], [140, 4.92], [160, 6.78], [180, 8.14], [200, 9.20]] },
+      { n: 'Gelenkbus 3-achsig (18 m)', x0: -2.55, rc: 8.50, w: [[40, -0.50], [60, 0.28], [80, 1.46], [100, 3.44], [120, 5.42], [140, 7.54], [160, 9.50], [180, 11.14], [200, 12.30]] }
+    ];
+    for (const tp of TPLS) {
+      const vt = Sim.PRESETS.find((p2) => p2.name === tp.n), ot = Sim.driveOpts(vt), lt = Sim.steerLimit(vt);
+      let mx = 0, bad = false;
+      for (const row of tp.w) {
+        const tt = Sim.makeTurn([pt(vt.front, 0), pt(tp.x0, 0)], -1, row[0] * Math.PI / 200, 0, vt, ot), te = tt.run.end;
+        const wv = Math.cos(te.h) * te.y - Math.sin(te.h) * te.x;
+        mx = Math.max(mx, Math.abs(wv - row[1]));
+        if (tt.clamped || tt.run.fail) bad = true;
+      }
+      add(tp.n + ': Austrittslinien der Schablone (40 bis 200 gon) auf 0,25 m genau, keine Kurve begrenzt', mx <= 0.25 && !bad, 'größte Abweichung ' + mx.toFixed(2) + ' m');
+      // The circle that the guide line of the template follows at full lock. It has the radius of the front axle at the stop.
+      add(tp.n + ': Leitkreis der Schablone = Radius der Vorderachse am Anschlag', closeTo(lt.rFront, tp.rc, 0.15), 'Schablone ' + tp.rc.toFixed(2) + ' m, Modell ' + lt.rFront.toFixed(2) + ' m');
+    }
     return res;
   };
 

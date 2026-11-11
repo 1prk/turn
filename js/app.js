@@ -30,7 +30,11 @@
   /* ---------- vehicles ---------- */
   const STORE = 'schleppkurve.vehicles.v1';
   const FIELDS = { v_wb: 'wb', v_front: 'front', v_rear: 'rear', v_width: 'width', v_rout: 'rOuter', v_track: 'track', v_ratio: 'ratio', v_gap: 'gap',
-                   v_hitch: 'hitch', v_axle2: 'axle2', v_rearOver: 'rearOver', v_knick: 'knickGon' };
+                   v_hitch: 'hitch', v_axle2: 'axle2', v_rearOver: 'rearOver', v_knick: 'knickGon',
+                   v_towRear: 'towRear', v_hitchFront: 'hitchFront', v_axles2: 'axles2', v_gap2: 'gap2',
+                   v_rampIn: 'rampIn', v_rampOut: 'rampOut', v_rampPow: 'rampPow' };
+  // These values can be 0. All other values must be more than 0. The distance kingpin to rear axle (hitch) of a semitrailer combination can be negative.
+  const ZERO_OK = ['gap', 'gap2', 'towRear', 'hitchFront', 'rampIn', 'rampOut', 'rampPow'];
   let vehicles = Sim.PRESETS.map((v) => Object.assign({}, v)), selIdx = 0;
   try {      // The browser can block the storage. The page also works without it.
     const saved = JSON.parse(localStorage.getItem(STORE));
@@ -277,8 +281,19 @@
   const gon = Sim.gon;        // All angles in the user interface are in gon. 400 gon is a full circle.
 
   /* The articulation angle that the turning circle needs, compared with the limit of the vehicle. */
+  const articCache = {};
   function articInfo() {
     if (!veh.artic) return '';
+    if (veh.semi) {
+      // There is no steady-state angle. Show the angle of a turn by 200 gon. The result is kept, because the calculation takes some time.
+      const key = JSON.stringify([veh.wb, veh.front, veh.width, veh.rOuter, veh.hitch, veh.axle2, veh.rampIn, veh.rampOut, veh.rampPow]);
+      if (!(key in articCache)) articCache[key] = Sim.articTurn(veh, 200);
+      const a = articCache[key];
+      if (a == null) return ' · <span class="bad">Gelenkmaße passen nicht</span>';
+      const ok = veh.knickGon * Math.PI / 200 >= a;
+      return ' · Knickwinkel bei einer Wende (200 gon) ' + f(gon(a), 1) + ' gon, Grenzwert ' + f(veh.knickGon, 1) + ' gon' +
+        (ok ? '' : ' <span class="bad">(zu klein für die Wende)</span>');
+    }
     const st = Sim.articSteady(veh);
     if (st == null) return ' · <span class="bad">Gelenkmaße passen nicht</span>';
     const ok = veh.knickGon * Math.PI / 200 >= st;
@@ -426,7 +441,7 @@
         ctx.beginPath();
         poly.forEach((c, k) => (k ? ctx.lineTo(c.x, c.y) : ctx.moveTo(c.x, c.y)));
         ctx.closePath();
-        ctx.fillStyle = i === 1 ? 'rgba(70,70,70,.55)' : 'rgba(255,255,255,.75)';
+        ctx.fillStyle = i === 1 && !v.semi ? 'rgba(70,70,70,.55)' : 'rgba(255,255,255,.75)';      // The bellows are dark.
         ctx.fill(); ctx.stroke();
       });
     }
@@ -459,9 +474,11 @@
       ctx.globalAlpha = alpha;
       ctx.translate(p.Tx, p.Ty); ctx.rotate(p.th2);
       ctx.fillStyle = '#222';
-      wheel(0, -t, 0); wheel(0, t, 0);
+      const n2 = v.axles2 > 1 ? Math.round(v.axles2) : 1, g2 = v.gap2 > 0 ? v.gap2 : 0;       // The axles of the rear body, centered on the axle point.
+      const xs2 = []; for (let k = 0; k < n2; k++) xs2.push((k - (n2 - 1) / 2) * g2);
+      xs2.forEach((x) => { wheel(x, -t, 0); wheel(x, t, 0); });
       ctx.strokeStyle = color; ctx.lineWidth = um;
-      ctx.beginPath(); ctx.moveTo(0, -t); ctx.lineTo(0, t); ctx.stroke();
+      ctx.beginPath(); xs2.forEach((x) => { ctx.moveTo(x, -t); ctx.lineTo(x, t); }); ctx.stroke();
       ctx.restore();
     }
   }
@@ -820,6 +837,9 @@
     $('v_trail').checked = !!veh.trail;
     $('v_artic').checked = !!veh.artic;
     $('articBox').style.display = veh.artic ? '' : 'none';
+    $('semiRow').style.display = veh.artic ? '' : 'none';
+    $('v_semi').checked = !!veh.semi;
+    $('semiBox').style.display = veh.artic && veh.semi ? '' : 'none';
     $('v_rear').disabled = !!veh.artic;           // For an articulated vehicle, the rear overhang is the sum of the three values.
   }
 
@@ -852,9 +872,9 @@
   Object.keys(FIELDS).forEach((id) => {
     $(id).addEventListener('input', () => {
       const v = parseFloat($(id).value);
-      // The distance of the rear axles can be 0 (one rear axle). All other values must be more than 0.
-      if (v > 0 || (FIELDS[id] === 'gap' && v >= 0)) {
-        veh[FIELDS[id]] = v;
+      const key = FIELDS[id];
+      if (Number.isFinite(v) && (v > 0 || (ZERO_OK.includes(key) && v >= 0) || (key === 'hitch' && veh.semi))) {
+        veh[key] = v;
         if (veh.artic && ['hitch', 'axle2', 'rearOver'].includes(FIELDS[id])) {
           veh.rear = veh.hitch + veh.axle2 + veh.rearOver;           // The distance from the middle axle to the end.
           $('v_rear').value = Math.round(veh.rear * 1000) / 1000;
@@ -866,10 +886,22 @@
   // Switch a vehicle to an articulated vehicle (a bus with a joint), or back.
   $('v_artic').addEventListener('change', () => {
     veh.artic = $('v_artic').checked;
+    if (!veh.artic) veh.semi = false;
     if (veh.artic) {
       veh.hitch = veh.hitch || 1.8; veh.axle2 = veh.axle2 || 4.2; veh.rearOver = veh.rearOver || 3.4; veh.knickGon = veh.knickGon || 65;
       veh.rear = veh.hitch + veh.axle2 + veh.rearOver;
     }
+    refreshFields(); saveVehicles(); recompute();
+  });
+  // Switch an articulated vehicle to a semitrailer combination (Sattelzug), or back.
+  $('v_semi').addEventListener('change', () => {
+    veh.semi = $('v_semi').checked;
+    if (veh.semi) {
+      if (!(veh.hitch < 0)) veh.hitch = -0.7;
+      veh.towRear = veh.towRear || 0.8; veh.hitchFront = veh.hitchFront || 1.7; veh.axles2 = veh.axles2 || 3; veh.gap2 = veh.gap2 || 1.3;
+      veh.knickGon = Math.max(veh.knickGon || 0, 100);
+    } else if (veh.hitch < 0) veh.hitch = 1.8;
+    veh.rear = veh.hitch + veh.axle2 + veh.rearOver;
     refreshFields(); saveVehicles(); recompute();
   });
   $('v_trail').addEventListener('change', () => { veh.trail = $('v_trail').checked; saveVehicles(); requestDraw(); });

@@ -39,6 +39,11 @@ Schleppkurvenschablonen für **Richtungsänderungswinkel von 40 bis 200 gon** an
   begrenzt.
 - **Gerade nach Bogen oder Kurve:** Sie führt tangential geradeaus heraus. Punkte daneben werden auf diese Linie gelegt.
 
+**Sattelzug und Lenkrampen:** Die Voreinstellung „Sattelzug 16,50 m“ (Zugmaschine 2 Achsen, Auflieger 3 Achsen, Sattelzapfen 0,73 m vor der
+Hinterachse) hat zwei Körper ohne Faltenbalg und Lenkrampen: Bei „Kurve nach Winkel“ ändert sich der Lenkwinkel mit konstanter Rate über der
+Wegstrecke (Fahrweise 1: „lenkt stetig ein und aus“). Fahrzeuge mit `rampIn = rampOut = 0` fahren wie bisher einen Kreisbogen.
+Prüfung gegen die Schablone „Schleppkurve 4, Sattelzug“: [docs/validierung-sattelzug.md](docs/validierung-sattelzug.md).
+
 Beim Wenden mit 200 gon und Mindestradius liegt der Außenradius der Karosserie genau auf dem Wendekreis (im Selbsttest:
 PKW 5,85 m, LKW 9,45 m bei 9,46 m).
 

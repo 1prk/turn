@@ -96,4 +96,5 @@ Zeichnung ist stimmig (Summe 18,00 m) und ist deshalb die Grundlage.
 | Fahrweise 1: Einschlag während der Fahrt, tangential, Außenradius = Wendekreis. | Unverändert. Der Einschlag ergibt sich aus dem Nachlaufen der Hinterachse. |
 | Fahrweise 2 (Einschlag im Stand). | Noch nicht umgesetzt. Nächster Schritt. |
 | Hüllkurve, Sicherheitsabstand. | Hüllkurve aus den vier Karosserieecken. Ein Sicherheitsabstand fehlt noch. |
+| Sattelzug: Zugmaschine und Auflieger mit Sattelzapfen vor der Hinterachse, Schablone mit Lenkübergängen (siehe [Validierung](validierung-sattelzug.md)). | Fahrzeug `semi` (zwei Körper), Lenkrampen `rampIn`/`rampOut`/`rampPow` bei „Kurve nach Winkel“. Die Rampen sind an die Schablone angepasst, nicht aus einer Quelle belegt. |
 | Gelenkbus: zwei Karosserien, Traktrix der hinteren Achse, Knickwinkel-Grenze. | **Gelenkfahrzeug** mit Gelenkpunkt, zweiter Karosserie, Faltenbalg und Grenzwert für den Knickwinkel. Eine Fahrkurve, die den Grenzwert überschreitet, ist nicht möglich. |

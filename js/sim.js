@@ -20,6 +20,15 @@
    * artic = true for an articulated vehicle (a bus with a joint). Then hitch, axle2, rearOver and knickGon are used:
    * hitch = distance from the middle axle to the joint, axle2 = distance from the joint to the rear axle,
    * rearOver = overhang behind the rear axle, knickGon = largest articulation angle in gon.
+   * semi = true for a semitrailer combination (Sattelzug). It is an articulated vehicle with these changes:
+   * hitch is negative when the kingpin is in front of the rear axle of the tractor.
+   * There are no bellows. The tractor is one body and the semitrailer is one body.
+   * towRear = overhang of the tractor behind its rear axle.
+   * hitchFront = distance from the front of the semitrailer to the kingpin (the semitrailer is in front of the kingpin by this value).
+   * axles2 and gap2 = number and distance of the axles of the semitrailer. The program uses them only to draw the axles.
+   * rampIn, rampOut = path length in meters over which the steering goes from straight to full lock, and from full lock back to straight,
+   * in a turn by angle (driving style 1). 0 = no ramps (the turn is an arc, tangential to the lines).
+   * rampOut is the length for a turn of 200 gon. rampPow = the power for shorter turns: ramp out = rampOut * (sweep / 200 gon) ^ rampPow.
    * ratio = steering ratio. It is the steering wheel angle divided by the road wheel angle. */
   Sim.PRESETS = [
     { name: 'PKW', wb: 2.86, front: 0.92, rear: 1.10, width: 1.89, rOuter: 5.85, track: 1.60, ratio: 13, gap: 0, trail: false, preset: true },
@@ -30,7 +39,17 @@
     // The middle axle is the rear axle of the model. rear = hitch + axle2 + rearOver is the distance from the middle axle to the end.
     // knickGon = the largest articulation angle. The value is not from the maker. It is a little more than the angle that the turning circle needs.
     { name: 'Gelenkbus 3-achsig (18 m)', wb: 5.90, front: 2.70, rear: 9.40, width: 2.55, rOuter: 11.40, track: 2.10, ratio: 20, gap: 0, trail: false,
-      artic: true, hitch: 1.79, axle2: 4.21, rearOver: 3.40, knickGon: 65, preset: true }
+      artic: true, hitch: 1.79, axle2: 4.21, rearOver: 3.40, knickGon: 65, preset: true },
+    // A semitrailer combination, 16.50 m (the dimensions of the template "Schleppkurve 4, Sattelzug"):
+    // tractor with 2 axles (length 6.20 m, 1.43 + 3.95 + 0.82) and semitrailer with 3 axles (length 13.59 m, 1.74 + 7.60 + 4.25).
+    // The kingpin is 0.73 m in front of the rear axle of the tractor: 16.50 - (7.60 + 4.25) = 4.65 m from the front, the rear axle is at 5.38 m.
+    // rear = hitch + axle2 + rearOver = -0.73 + 7.60 + 4.25 = 11.12 m. rOuter = outer turning circle radius 7.9 m.
+    // knickGon: a turn of 200 gon needs about 70 gon with the steering ramps, and 82 gon with a plain arc (see Sim.articTurn).
+    // 100 gon is 90 degrees, the usual limit of a kingpin.
+    // rampIn, rampOut, rampPow: the steering ramps that the template shows (fitted to the template, see docs/validierung-sattelzug.md).
+    { name: 'Sattelzug 16,50 m', wb: 3.95, front: 1.43, rear: 11.12, width: 2.55, rOuter: 7.9, track: 2.00, ratio: 20, gap: 0, trail: false,
+      artic: true, semi: true, hitch: -0.73, axle2: 7.60, rearOver: 4.25, towRear: 0.82, hitchFront: 1.74, axles2: 3, gap2: 1.26,
+      knickGon: 100, rampIn: 0.5, rampOut: 24, rampPow: 2, preset: true }
   ];
   Sim.DEFAULT_VEHICLE = Object.assign({}, Sim.PRESETS[0]);
 
@@ -195,7 +214,7 @@
   Sim.driveOpts = function (v) {
     const lim = Sim.steerLimit(v);
     if (!lim) return null;
-    return { step: 0.05, dMax: lim.delta, rFront: lim.rFront, rMax: 200 };
+    return { step: 0.05, dMax: lim.delta, rFront: lim.rFront, rMax: 200, rampIn: v.rampIn > 0 ? v.rampIn : 0, rampOut: v.rampOut > 0 ? v.rampOut : 0, rampPow: v.rampPow > 0 ? v.rampPow : 0 };
   };
 
   /* Driving style 1.
@@ -283,6 +302,47 @@
       if (!(aa > 1e-6)) { ends[e.src] = { x: pose.x, y: pose.y }; return; }
       const R = e.R > 0 ? e.R : o.rFront, sign = sweep > 0 ? 1 : -1;
       if (R < o.rFront - 1e-6) setFail({ kind: 'radius', R: R, rMin: o.rFront });
+      if (o.rampIn > 0 || o.rampOut > 0) {
+        // Steering ramps (driving style 1: the driver steers in and out while the vehicle moves).
+        // The steering angle changes at a constant rate along the path: from 0 to the full angle over o.rampIn meters,
+        // and back to 0 over o.rampOut meters. The path of the front axle follows from the one-track model
+        // (the vehicle heading changes by sin(steering angle) / wheelbase per meter). The vehicle heading at the start is the path direction.
+        // Between the ramps, the steering stays at the angle for the radius R. The function finds the length of this part,
+        // so that the vehicle turns exactly by the sweep. If the turn is short, there is no such part and the peak steering is smaller
+        // (the steering rate stays the same).
+        const dFull = Math.min(o.dMax, Math.asin(Math.min(1, v.wb / R)));      // The steering angle for the radius R of the front axle.
+        // The ramp out is longer for a bigger turn: rampOut is the length for 200 gon. For a smaller turn it is shorter
+        // by the factor (sweep / 200 gon) to the power rampPow (0 = the same length for all turns). A turn of more than 200 gon uses rampOut.
+        const outScale = Math.pow(Math.min(1, aa / Math.PI), o.rampPow);
+        const run = (dp, H, ds, keep) => {
+          const l1 = Math.max(1e-6, o.rampIn * dp / o.dMax), l2 = Math.max(1e-6, o.rampOut * outScale * dp / o.dMax), tot = l1 + H + l2;
+          let x = pose.x, y = pose.y, th = 0, s = 0;
+          while (s < tot - 1e-9) {
+            const st = Math.min(ds, tot - s), sm = s + st / 2;
+            const d = sm < l1 ? dp * sm / l1 : sm < l1 + H ? dp : dp * Math.max(0, 1 - (sm - l1 - H) / l2);
+            const dth = st * Math.sin(d) / v.wb, dir = pose.h + sign * (th + dth / 2 + d);
+            x += st * Math.cos(dir); y += st * Math.sin(dir); th += dth; s += st;
+            if (keep) path.push({ x: x, y: y });
+          }
+          return { th: th, x: x, y: y };
+        };
+        let dp = dFull, H = 0;
+        const th0 = run(dp, 0, 0.1, false).th;
+        if (th0 > aa) {                                                         // A short turn. Find the peak steering angle.
+          let lo = 0, hi = dp;
+          for (let i = 0; i < 40; i++) { const mid = (lo + hi) / 2; if (run(mid, 0, 0.1, false).th > aa) hi = mid; else lo = mid; }
+          dp = (lo + hi) / 2;
+        } else {                                                                // A long turn. Find the length of the part with constant steering.
+          let lo = 0, hi = (aa - th0) * R * 1.05 + 1;
+          for (let i = 0; i < 40; i++) { const mid = (lo + hi) / 2; if (run(dp, mid, 0.1, false).th < aa) lo = mid; else hi = mid; }
+          H = (lo + hi) / 2;
+        }
+        const r = run(dp, H, o.step, true);
+        pose = { x: r.x, y: r.y, h: pose.h + sweep };                           // The direction is exact. The steering is 0 at the end.
+        ends[e.src] = { x: r.x, y: r.y };
+        lastArc = { R: R, delta: sweep };
+        return;
+      }
       const C = { x: pose.x - sign * R * Math.sin(pose.h), y: pose.y + sign * R * Math.cos(pose.h) };
       const phi0 = Math.atan2(pose.y - C.y, pose.x - C.x), m = Math.max(1, Math.ceil(R * aa / o.step));
       for (let i = 1; i <= m; i++) path.push({ x: C.x + R * Math.cos(phi0 + sweep * i / m), y: C.y + R * Math.sin(phi0 + sweep * i / m) });
@@ -405,7 +465,14 @@
     for (let k = 0; k < 40; k++) {
       el = { t: 'turn', sweep: side * sweepAbs, R: Rreq > 0 || grown ? R : 0 };
       run = Sim.buildRoute(P.concat([el]), v, o);
-      if (!run.fail) break;
+      let bad = run.fail;
+      if (!bad && v.artic) {
+        // The rear body follows the turn late. The articulation angle can grow after the end of the turn.
+        // The check includes a straight exit that is as long as the rear body.
+        const e = run.end, L = v.axle2 + 4;
+        bad = Sim.buildRoute(P.concat([el, { x: e.x + L * Math.cos(e.h), y: e.y + L * Math.sin(e.h), t: 'line' }]), v, o).fail;
+      }
+      if (!bad) break;
       R *= 1.05; clamped = true; grown = true;           // The steering is more than the limit. Make the radius larger.
     }
     return { el: el, clamped: clamped, run: run };
@@ -484,18 +551,24 @@
   /* Body polygon. Corner order: front left, front right, rear right, rear left. */
   Sim.bodyPoly = function (smp, v) {
     // An articulated vehicle: this is the front body. It ends at the joint.
-    const hw = v.width / 2, xf = v.wb + v.front, xr = v.artic ? -v.hitch : -v.rear;
+    // A semitrailer combination: the tractor ends at its own rear overhang. The kingpin is inside the body.
+    const hw = v.width / 2, xf = v.wb + v.front, xr = v.artic ? (v.semi ? -v.towRear : -v.hitch) : -v.rear;
     return [Sim.local(smp, xf, -hw), Sim.local(smp, xf, hw), Sim.local(smp, xr, hw), Sim.local(smp, xr, -hw)];
   };
 
   /* All polygons of the vehicle. A normal vehicle has one polygon.
    * An articulated vehicle has three: the front body, the bellows of the joint, and the rear body.
+   * A semitrailer combination has two: the tractor and the semitrailer. The semitrailer starts hitchFront in front of the kingpin.
    * All polygons have the same direction of the corners, so that the union can be drawn with one fill. */
   Sim.bodyPolys = function (smp, v) {
     const front = Sim.bodyPoly(smp, v);
     if (!v.artic) return [front];
     const hw = v.width / 2, c = Math.cos(smp.th2), sn = Math.sin(smp.th2);
     const loc2 = (x, y) => ({ x: smp.Tx + x * c - y * sn, y: smp.Ty + x * sn + y * c });      // The frame of the rear body.
+    if (v.semi) {
+      const xs = v.axle2 + v.hitchFront;
+      return [front, [loc2(xs, -hw), loc2(xs, hw), loc2(-v.rearOver, hw), loc2(-v.rearOver, -hw)]];
+    }
     const rear = [loc2(v.axle2, -hw), loc2(v.axle2, hw), loc2(-v.rearOver, hw), loc2(-v.rearOver, -hw)];
     const bellows = [Sim.local(smp, -v.hitch, -hw), Sim.local(smp, -v.hitch, hw), loc2(v.axle2, hw), loc2(v.axle2, -hw)];
     return [front, bellows, rear];
@@ -505,6 +578,7 @@
    * front left, front right, rear right, rear left. For an articulated vehicle, the rear corners are on the rear body. */
   Sim.trailPoints = function (smp, v) {
     const p = Sim.bodyPolys(smp, v);
+    if (v.semi) return [p[0][0], p[0][1], p[1][2], p[1][3]];
     return v.artic ? [p[0][0], p[0][1], p[2][2], p[2][3]] : p[0];
   };
 
@@ -516,6 +590,22 @@
     const rh = hyp(lim.rRear, v.hitch);
     if (v.axle2 >= rh) return null;
     return Math.atan(v.hitch / lim.rRear) + Math.asin(v.axle2 / rh);
+  };
+
+  /* The largest articulation angle (radians) in a turn by angle with the minimum turning circle, from a straight line.
+   * sweepGon = the change of direction in gon. The vehicle drives 20 m straight before the turn and 40 m after it.
+   * Use it for a semitrailer combination. It has no steady-state articulation angle (Sim.articSteady is null):
+   * the kingpin circle is smaller than the length of the semitrailer. The angle then grows with the turn.
+   * The limit knickGon does not apply here. Return null if the vehicle data are not valid. */
+  Sim.articTurn = function (v, sweepGon) {
+    const w = Object.assign({}, v, { knickGon: 1e6 }), o = Sim.driveOpts(w);
+    if (!o || !v.artic) return null;
+    const P = [{ x: 0, y: 0 }, { x: -20, y: 0 }];
+    const t = Sim.makeTurn(P, 1, sweepGon * Math.PI / 200, 0, w, o), e = t.run.end;
+    const run = Sim.buildRoute(P.concat([t.el, { x: e.x + 40 * Math.cos(e.h), y: e.y + 40 * Math.sin(e.h) }]), w, o);
+    let m = 0;
+    for (const q of run.smp) m = Math.max(m, Math.abs(q.phi));
+    return m;
   };
 
   /* Calculate the scale (meters per unit u). The inputs are a polyline in unit u and its real length in meters. */
@@ -697,7 +787,8 @@
 
     // Turn by angle (the turn template of the RBSV, the corner path of AutoTURN).
     // A turn with 200 gon is a turn around in one movement. The radius is the minimum turning circle.
-    for (const veh2 of Sim.PRESETS) {
+    // This test is for the plain arc. The vehicles have no steering ramps here.
+    for (const veh2 of Sim.PRESETS.map((p) => Object.assign({}, p, { rampIn: 0, rampOut: 0, rampPow: 0 }))) {
       const o2 = Sim.driveOpts(veh2);
       const t200 = Sim.makeTurn([pt(0, 0), pt(20, 0)], 1, Math.PI, 0, veh2, o2), e2 = t200.run.end;
       add(veh2.name + ': Wende mit 200 gon in einem Zug, Endpunkt auf 1 mm genau',
@@ -717,9 +808,9 @@
     const tSmall = Sim.makeTurn([pt(0, 0), pt(20, 0)], -1, Math.PI / 2, 2, v, o);
     add('Kurve nach Winkel: ein Radius unter dem Wendekreis wird auf den Mindestradius begrenzt',
       tSmall.clamped && !tSmall.run.fail && tSmall.run.lastArc.R >= o.rFront - 1e-9, 'R = ' + tSmall.run.lastArc.R.toFixed(2) + ' m');
-    // Random turns: both vehicles, 40 to 390 gon, both sides, minimum radius or a larger radius, with other parts before and after.
+    // Random turns: all vehicles but the Sattelzug, 40 to 390 gon, both sides, minimum radius or a larger radius, with other parts before and after.
     let badT = 0, jumpT = 0, totalT = 0;
-    for (const veh2 of Sim.PRESETS) {
+    for (const veh2 of Sim.PRESETS.filter((p) => !p.semi)) {
       const o2 = Sim.driveOpts(veh2);
       for (let r = 0; r < 40; r++) {
         let route = [pt(0, 0), pt(15 + rnd() * 30, 0)];
@@ -742,12 +833,12 @@
         if (m > 0.0502 || hmax > 0.06) jumpT++;
       }
     }
-    add('Kurve nach Winkel (40 bis 390 gon, beide Seiten, beide Fahrzeuge): alle Routen fahrbar, ohne Sprünge', badT === 0 && jumpT === 0,
+    add('Kurve nach Winkel (40 bis 390 gon, beide Seiten, alle Fahrzeuge außer Sattelzug): alle Routen fahrbar, ohne Sprünge', badT === 0 && jumpT === 0,
       totalT + ' Kurven, ' + badT + ' nicht fahrbar, ' + jumpT + ' Sprünge');
 
     // Limited points of both kinds in random order. The vehicle can drive each route, and the route has no jumps.
     let badMix = 0, jumpMix = 0, clampMix = 0, totalMix = 0, bigTurn = 0;
-    for (const veh2 of Sim.PRESETS) {
+    for (const veh2 of Sim.PRESETS.filter((p) => !p.semi)) {
       const o2 = Sim.driveOpts(veh2);
       for (let r = 0; r < 25; r++) {
         let route = [pt(0, 0), pt(15 + rnd() * 30, 0)];
@@ -771,6 +862,64 @@
     }
     add('Zielpunkt-Begrenzung (Gerade und Bogen gemischt): alle Routen fahrbar, ohne Sprünge', badMix === 0 && jumpMix === 0,
       totalMix + ' Punkte, davon ' + clampMix + ' begrenzt, ' + bigTurn + ' Wenden über 200 gon, ' + badMix + ' nicht fahrbar, ' + jumpMix + ' Sprünge');
+
+    // ---- Sattelzug (semitrailer combination). The numbers are from the template "Schleppkurve 4, Sattelzug" (A3, 1:250).
+    const sz = Sim.PRESETS.find((p) => p.semi), oz = Sim.driveOpts(sz), limZ = Sim.steerLimit(sz);
+    const closeTo = (a, b, tol) => Math.abs(a - b) <= tol;
+    add('Sattelzug: Maße der Vorlage (Zugmaschine 6,20 m, Auflieger 13,59 m, gesamt 16,50 m)',
+      closeTo(sz.front + sz.wb + sz.towRear, 6.20, 1e-9) && closeTo(sz.hitchFront + sz.axle2 + sz.rearOver, 13.59, 1e-9) && closeTo(sz.front + sz.wb + sz.rear, 16.50, 1e-9),
+      (sz.front + sz.wb + sz.towRear).toFixed(2) + ' m + ' + (sz.hitchFront + sz.axle2 + sz.rearOver).toFixed(2) + ' m, gesamt ' + (sz.front + sz.wb + sz.rear).toFixed(2) + ' m');
+    // Total length 16.50 m: the kingpin is 16.50 - (7.60 + 4.25) = 4.65 m from the front. The rear axle is at 5.38 m. So the kingpin is 0.73 m in front of it.
+    add('Sattelzug: Sattelzapfen 0,73 m vor der Hinterachse der Zugmaschine', closeTo(sz.hitch, 16.5 - (sz.axle2 + sz.rearOver) - sz.front - sz.wb, 0.005) && sz.hitch < 0, 'hitch = ' + sz.hitch.toFixed(2) + ' m');
+    add('Sattelzug: Wendekreis 7,9 m ergibt Lenkwinkel 45,8 gon und Radius der Vorderachse 6,00 m', limZ && closeTo(Sim.gon(limZ.delta), 45.8, 0.1) && closeTo(limZ.rFront, 6.00, 0.01),
+      limZ ? Sim.gon(limZ.delta).toFixed(2) + ' gon, ' + limZ.rFront.toFixed(3) + ' m' : '');
+    const zLine = Sim.run([pt(0, 0), pt(30, 0)].reduce((a2, p2, i2, arr) => { if (i2) for (let k = 1; k <= 600; k++) a2.push(pt(arr[0].x + (p2.x - arr[0].x) * k / 600, 0)); else a2.push(p2); return a2; }, []), sz);
+    const zPoly = Sim.bodyPolys(zLine[10], sz), zQ = zLine[10];
+    const zx = (poly) => poly.map((c) => (c.x - zQ.Rx) * Math.cos(zQ.th) + (c.y - zQ.Ry) * Math.sin(zQ.th));     // x in the frame of the tractor rear axle, straight vehicle.
+    const zAll = zPoly.flatMap(zx);
+    add('Sattelzug: zwei Körper (Zugmaschine und Auflieger), kein Faltenbalg', zPoly.length === 2 && Sim.trailPoints(zQ, sz).length === 4, zPoly.length + ' Polygone');
+    add('Sattelzug: Gesamtlänge 16,50 m, Auflieger 1,74 m vor dem Zapfen, Zugmaschine 0,82 m hinter der Hinterachse',
+      closeTo(Math.max(...zAll) - Math.min(...zAll), 16.50, 0.005) && closeTo(Math.max(...zx(zPoly[1])), -sz.hitch + 1.74, 0.005) && closeTo(Math.min(...zx(zPoly[0])), -0.82, 0.005),
+      'Länge ' + (Math.max(...zAll) - Math.min(...zAll)).toFixed(3) + ' m, Auflieger vorn bei ' + Math.max(...zx(zPoly[1])).toFixed(2) + ' m, Zugmaschine hinten bei ' + Math.min(...zx(zPoly[0])).toFixed(2) + ' m');
+    // The semitrailer follows the kingpin. The distance kingpin to axle group is always the same.
+    const zTurn = Sim.makeTurn([pt(0, 0), pt(-20, 0)], 1, Math.PI, 0, sz, oz);
+    let zErr = 0; zTurn.run.smp.forEach((q) => { zErr = Math.max(zErr, Math.abs(hyp(q.Hx - q.Tx, q.Hy - q.Ty) - sz.axle2)); });
+    add('Sattelzug: Abstand Sattelzapfen–Achsgruppe bleibt 7,60 m', zErr < 1e-9, 'Abweichung ' + zErr.toExponential(1) + ' m');
+    const zArt = Sim.articTurn(sz, 200);
+    add('Sattelzug: kein stationärer Knickwinkel (Zapfenkreis kleiner als der Auflieger), Wende mit 200 gon braucht ' + (zArt ? Sim.gon(zArt).toFixed(0) : '–') + ' gon',
+      Sim.articSteady(sz) === null && Sim.gon(zArt) > 60 && Sim.gon(zArt) < 95 && zArt <= sz.knickGon * Math.PI / 200, 'Grenzwert ' + sz.knickGon + ' gon, nötig ' + (zArt ? Sim.gon(zArt).toFixed(1) : '–') + ' gon');
+    const szLow = Object.assign({}, sz, { knickGon: 65 }), tzLow = Sim.makeTurn([pt(0, 0), pt(-20, 0)], 1, Math.PI, 0, szLow, Sim.driveOpts(szLow));
+    add('Sattelzug: ein zu kleiner Grenzwert für den Knickwinkel (65 gon) zwingt zu einem größeren Radius', tzLow.clamped && tzLow.run.lastArc.R > oz.rFront + 0.5 && !tzLow.run.fail,
+      'R = ' + tzLow.run.lastArc.R.toFixed(2) + ' m statt ' + oz.rFront.toFixed(2) + ' m');
+    // Steering ramps: the steering angle stays in the limit, the end direction is exact, the path has no jumps. A turn without ramps is not changed.
+    for (const veh2 of Sim.PRESETS) {
+      const vr = Object.assign({}, veh2, { rampIn: 3, rampOut: 10, rampPow: 1 }), or = Sim.driveOpts(vr);
+      let okR = true, detail = '';
+      for (const g2 of [40, 100, 200, 300]) {
+        const t = Sim.makeTurn([pt(0, 0), pt(-20, 0)], 1, g2 * Math.PI / 200, 0, vr, or), q2 = t.run.smp;
+        let dm = 0, jmp = 0;
+        for (let i = 0; i < q2.length; i++) { dm = Math.max(dm, Math.abs(q2[i].d)); if (i) jmp = Math.max(jmp, hyp(q2[i].Fx - q2[i - 1].Fx, q2[i].Fy - q2[i - 1].Fy)); }
+        const hOk = closeTo(Math.abs(normAngle(t.run.end.h - Math.PI)), Math.abs(normAngle(g2 * Math.PI / 200)), 1e-6) || closeTo(Math.abs(Math.abs(normAngle(t.run.end.h - Math.PI)) - g2 * Math.PI / 200), 0, 1e-6) || g2 > 200;
+        if (t.run.fail || dm > or.dMax + 0.01 || jmp > 0.0502 || !hOk) { okR = false; detail += veh2.name + ' ' + g2 + ' gon: ' + (t.run.fail ? t.run.fail.kind : 'd ' + Sim.gon(dm).toFixed(1) + ' / Sprung ' + jmp.toFixed(3)) + '; '; }
+      }
+      add('Lenkrampen (' + veh2.name + '): 40 bis 300 gon fahrbar, Lenkwinkel im Limit, ohne Sprünge', okR, detail);
+    }
+    // The ramp makes the turn wider. With a ramp out, the vehicle turns a part of the angle while the steering comes back.
+    const noRamp = Sim.buildRoute([pt(0, 0), pt(-3.75, 0), { t: 'turn', sweep: -Math.PI, R: 0 }], sz, Object.assign({}, oz, { rampIn: 0, rampOut: 0, rampPow: 0 })).end;
+    const wRamp = Sim.buildRoute([pt(0, 0), pt(-3.75, 0), { t: 'turn', sweep: -Math.PI, R: 0 }], sz, oz).end;
+    add('Lenkrampen: die Wende mit 200 gon wird mit Rampen breiter als der Kreisbogen (2R)', Math.abs(wRamp.y) > Math.abs(noRamp.y) + 0.5, 'Versatz ' + Math.abs(wRamp.y).toFixed(2) + ' m statt ' + Math.abs(noRamp.y).toFixed(2) + ' m');
+    // Compare the exit lines of the template with the model. The template has nine curves, 40 to 200 gon.
+    // The values are measured in the template picture (exit line of the guide line, distance from the line of the start, in meters).
+    // The tolerance is the uncertainty of the measurement (about 0.4 m) and the remaining difference of the model.
+    // The turn starts 3.75 m in front of the tractor front (5.18 m after the front axle at the start).
+    const TPL = [[40, 1.12, 0.6], [60, 2.40, 0.7], [80, 3.78, 0.7], [100, 5.12, 0.6], [120, 6.22, 0.7], [140, 7.76, 0.8], [160, 8.74, 1.4], [180, 10.68, 1.2], [200, 13.12, 0.4]];
+    let tplOk = true, tplTxt = [];
+    for (const row of TPL) {
+      const zt = Sim.makeTurn([pt(1.43, 0), pt(-3.75, 0)], -1, row[0] * Math.PI / 200, 0, sz, oz), ze = zt.run.end, w = Math.cos(ze.h) * ze.y - Math.sin(ze.h) * ze.x;
+      if (Math.abs(w - row[1]) > row[2]) tplOk = false;
+      tplTxt.push(row[0] + ' gon: ' + w.toFixed(2) + ' (' + row[1].toFixed(2) + ')');
+    }
+    add('Sattelzug: Austrittslinien der Schablone (40 bis 200 gon) innerhalb der Messtoleranz', tplOk, 'Modell (Vorlage) in m: ' + tplTxt.join('; '));
     return res;
   };
 

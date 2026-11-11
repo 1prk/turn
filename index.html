@@ -68,10 +68,22 @@
     <div class="row"><label title="Die hinterste Achse lenkt mit. Das gilt nur für die Darstellung der Räder"><input type="checkbox" id="v_trail"> Nachlauflenkachse (Darstellung)</label></div>
     <div class="row"><label title="Fahrzeug mit Gelenk, zum Beispiel ein Gelenkbus. Die hintere Karosserie folgt dem Gelenk"><input type="checkbox" id="v_artic"> Gelenkfahrzeug (Gelenkbus)</label></div>
     <div class="grid" id="articBox" style="display:none">
-      <label for="v_hitch">Mittelachse bis Gelenk [m]</label><input id="v_hitch" type="number" step="0.01" min="0">
-      <label for="v_axle2">Gelenk bis Hinterachse [m]</label><input id="v_axle2" type="number" step="0.01" min="0">
+      <label for="v_hitch" title="Beim Sattelzug negativ, wenn der Sattelzapfen vor der Hinterachse der Zugmaschine liegt">Mittelachse bis Gelenk / Zapfen [m]</label><input id="v_hitch" type="number" step="0.01">
+      <label for="v_axle2" title="Beim Sattelzug: Sattelzapfen bis Mitte der Achsgruppe des Aufliegers">Gelenk bis Hinterachse [m]</label><input id="v_axle2" type="number" step="0.01" min="0">
       <label for="v_rearOver">Überhang hinter der Hinterachse [m]</label><input id="v_rearOver" type="number" step="0.01" min="0">
       <label for="v_knick">Max. Knickwinkel [gon]</label><input id="v_knick" type="number" step="1" min="1">
+    </div>
+    <div class="row" id="semiRow" style="display:none"><label title="Zugmaschine mit Auflieger: zwei Körper ohne Faltenbalg. Der Auflieger beginnt vor dem Sattelzapfen"><input type="checkbox" id="v_semi"> Sattelzug (Auflieger mit Sattelzapfen)</label></div>
+    <div class="grid" id="semiBox" style="display:none">
+      <label for="v_towRear">Zugmaschine: Überhang hinter der Hinterachse [m]</label><input id="v_towRear" type="number" step="0.01" min="0">
+      <label for="v_hitchFront">Auflieger: Vorderkante bis Sattelzapfen [m]</label><input id="v_hitchFront" type="number" step="0.01" min="0">
+      <label for="v_axles2">Auflieger: Anzahl Achsen (Darstellung)</label><input id="v_axles2" type="number" step="1" min="1">
+      <label for="v_gap2">Auflieger: Abstand der Achsen (Darstellung) [m]</label><input id="v_gap2" type="number" step="0.01" min="0">
+    </div>
+    <div class="grid" style="margin-top:6px">
+      <label for="v_rampIn" title="Wegstrecke, auf der das Lenkrad bei „Kurve nach Winkel“ von geradeaus bis zum vollen Einschlag dreht. 0 = kein Übergang (Kreisbogen)">Lenkrampe ein [m]</label><input id="v_rampIn" type="number" step="0.5" min="0">
+      <label for="v_rampOut" title="Wegstrecke für das Zurücklenken bei einer Kurve von 200 gon. 0 = kein Übergang">Lenkrampe aus (bei 200 gon) [m]</label><input id="v_rampOut" type="number" step="0.5" min="0">
+      <label for="v_rampPow" title="Bei kleinerer Richtungsänderung ist die Rampe aus kürzer: Länge = Wert · (Winkel / 200 gon) hoch Exponent. 0 = immer gleich lang">Lenkrampe: Exponent</label><input id="v_rampPow" type="number" step="0.5" min="0">
     </div>
     <div class="mute" style="font-size:12px">Die Hinterachse im Modell ist die Mitte der hinteren Achsen. Radstand und Überhang hinten beziehen sich auf diese Mitte.</div>
     <div class="row"><button id="vehDel">Fahrzeug löschen</button><button id="vehReset">Voreinstellung wiederherstellen</button></div>

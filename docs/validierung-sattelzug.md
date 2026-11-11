@@ -28,7 +28,7 @@ Es gab fünf Abweichungen im Programm:
 | F2 | `Sim.bodyPolys`: Der Auflieger begann am Sattelzapfen. Seine Vorderkante (1,74 m davor) fehlte. Die Hüllfläche war bis 0,60 m zu klein (2,3 m² bei 40 gon, 8,6 m² bei 200 gon). | Feld `hitchFront`. |
 | F3 | Die Zugmaschine endete am Sattelzapfen statt 0,82 m hinter der Hinterachse. Der Faltenbalg war für einen Sattelzug sinnlos. | Felder `semi`, `towRear`. Zwei Körper, kein Faltenbalg. |
 | F4 | Grenzwert des Knickwinkels: 65 gon (Wert des Busses) zwang die Wende auf R = 8,03 m. `Sim.articSteady` gibt für den Sattelzug `null` (kein stationärer Kreis, weil der Zapfenkreis von 4,57 m kleiner ist als der Auflieger mit 7,6 m). | `knickGon` = 100 gon. Neue Funktion `Sim.articTurn` (Knickwinkel einer Wende). `Sim.makeTurn` prüft bei Gelenkfahrzeugen auch eine gerade Ausfahrt. |
-| F5 | Die Wende war ein Kreisbogen ohne Lenkübergänge. Die Schablone hat sie. Der Versatz der Austrittslinie war bei 200 gon 11,99 m statt 13,1 m. | Lenkrampen (`rampIn`, `rampOut`, `rampPow`), siehe unten. |
+| F5 | Die Wende war ein Kreisbogen ohne Lenkübergänge. Die Schablone hat sie. Der Versatz der Austrittslinie war bei 200 gon 11,99 m statt 13,1 m. | Lenkrampen (`rampIn`, `rampOut`, Tabelle `rampTable`), siehe unten. |
 
 ## 2. Lenkrampen (F5)
 
@@ -36,69 +36,86 @@ Fahrweise 1 sagt: Der Fahrer lenkt **während der Fahrt** stetig ein und stetig 
 Jetzt gilt für „Kurve nach Winkel“, wenn ein Fahrzeug Rampen hat:
 
 - Der Lenkwinkel ändert sich mit konstanter Rate über der Wegstrecke: in `rampIn` Metern von 0 bis zum vollen Einschlag, in
-  `rampOut · (Winkel / 200 gon)^rampPow` Metern zurück auf 0.
+  `rampOut` Metern zurück auf 0.
 - Die Bahn der Vorderachse ergibt sich aus dem Einspurmodell (Richtungsänderung je Meter = sin(Lenkwinkel) / Radstand).
   Das Fahrzeug dreht sich also auch noch, während die Lenkung zurückgeht.
 - Dazwischen bleibt der Lenkwinkel konstant (Radius R). Die Länge dieses Teils wird so gesucht, dass die Richtungsänderung genau
   stimmt. Bei kurzen Kurven wird der Spitzenwinkel kleiner.
 - Ohne Rampen (`rampIn = rampOut = 0`, alle anderen Fahrzeuge) ist das Verhalten unverändert (Kreisbogen).
+- Ein Fahrzeug kann statt der festen Längen eine **Tabelle** `rampTable` haben: Zeilen `[Richtungsänderung in gon, rampIn, rampOut]`.
+  Zwischen den Zeilen wird interpoliert. Der Sattelzug hat eine Tabelle mit den neun Kurven der Schablone.
 - Die Rampen gelten nur für „Kurve nach Winkel“ (K, W), nicht für Ecken (G) und Bogen durch Punkt (B).
 - Die Rampen setzen voraus, dass das Fahrzeug am Anfang der Kurve gerade steht (wie nach einer Geraden).
 
-Werte für den Sattelzug (angepasst an die Schablone): `rampIn` = 0,5 m, `rampOut` = 24 m (bei 200 gon), `rampPow` = 2.
-Die Lenkung beginnt 3,75 m vor der Vorderkante des Fahrzeugs im Startbild (5,18 m nach der Vorderachse).
-Grund für die Form: Die digitalisierte Leitlinie der 200-gon-Kurve geht geradeaus bis X ≈ −2,2 bis −3,3 m, lenkt schnell ein,
-hält R ≈ 6,0 m (das ist der Radius der Vorderachse bei Wendekreis 7,9 m) und öffnet dann über etwa 15 m langsam.
-Einfache Modelle (Kreisbogen, symmetrische Rampen, Rampen mit linear steigender Krümmung) passten nicht.
+**Erste Fassung:** Ein einziges Gesetz für alle Winkel (`rampOut` = 24 m bei 200 gon, kürzer mit dem Quadrat des Winkels) lag im Mittel
+0,42 m neben den blauen Linien der Schablone, bei 160 und 180 gon war die Austrittslinie bis 1,2 m falsch. Das war nicht genau genug.
+
+**Jetzt:** Für jede der neun Kurven sind `rampIn` und `rampOut` einzeln an die Schablone angepasst. Das Ziel war der mittlere Abstand der
+berechneten Hüllkurve zu den Linien der Schablone und der gemessene Austrittsversatz. Die Lenkung beginnt bei allen Kurven an derselben
+Stelle: 3,75 m vor der Vorderkante des Fahrzeugs im Startbild (5,18 m nach der Vorderachse).
+
+| gon | rampIn [m] | rampOut [m] |
+|---|---|---|
+| 40 | 1,10 | 2,50 |
+| 60 | 1,00 | 6,00 |
+| 80 | 0,90 | 5,50 |
+| 100 | 1,00 | 6,00 |
+| 120 | 1,00 | 0,55 |
+| 140 | 1,20 | 4,00 |
+| 160 | 1,30 | 5,00 |
+| 180 | 2,30 | 14,00 |
+| 200 | 1,30 | 24,50 |
+
+Die Werte sind nicht glatt (120 gon hat die kürzeste Rampe). Die Messung hat 120 gon mit 0,55 m klar bevorzugt (Zielwert 0,078 gegen 0,092 bei 2 m).
+Die Form der Schablone (Kurven bis 100 gon: Rampe aus 2,5 bis 6 m; ab 180 gon lang) folgt vermutlich aus der Steuerung der Schablonen-Software.
+Sie ist nicht belegt. Für Winkel zwischen den neun Kurven interpoliert das Programm.
 
 ## 3. Prüfung nach den Änderungen
 
-Alle Werte: Programm gegen Schablone. Die Schablone ist ein Bild (Maßstab 16,3 px/m, Unsicherheit etwa 1 %).
+Alle Werte: Programm gegen Schablone. Die Schablone ist ein Bild (Maßstab 16,3 px/m, ein Pixel = 0,06 m).
 
-### 3.1 Hüllkurve, alle neun Winkel (Programm mit Rampen gegen Programm nur mit Kreisbogen)
-Mittlerer Abstand der berechneten Hüllkurve zur nächsten blauen Linie, ohne Startbild und Endbild. Rampen: Lenkbeginn 3,75 m vor der
-Vorderkante. Kreisbogen: Beginn 1,0 m hinter der Vorderkante (beste gemeinsame Anpassung für alle neun Winkel):
+### 3.1 Hüllkurve, alle neun Winkel
+Abstand der berechneten Hüllkurve (Zugmaschine und Auflieger, ohne Startbild und Endkappe) zur nächsten Linie der Schablone:
 
-| gon | mit Rampen [m] | nur Kreisbogen [m] | Austrittslinie: Schablone [m] | mit Rampen (Diff.) | nur Kreisbogen (Diff.) |
+| gon | Mittel [m] | 95 % [m] | größter [m] | innerhalb 0,25 m | Austrittsversatz, Fehler [m] |
 |---|---|---|---|---|---|
-| 40 | 0,33 | 0,58 | 1,12 | 0,90 (−0,22) | 0,56 (−0,56) |
-| 60 | 0,35 | 0,57 | 2,40 | 1,95 (−0,45) | 1,66 (−0,74) |
-| 80 | 0,37 | 0,49 | 3,78 | 3,29 (−0,49) | 3,19 (−0,59) |
-| 100 | 0,54 | 0,64 | 5,12 | 4,86 (−0,26) | 5,00 (−0,12) |
-| 120 | 0,42 | 0,57 | 6,22 | 6,55 (+0,33) | 6,90 (+0,68) |
-| 140 | 0,43 | 0,57 | 7,76 | 8,28 (+0,52) | 8,71 (+0,95) |
-| 160 | 0,55 | 0,62 | 8,74 | 9,96 (+1,22) | 10,26 (+1,52) |
-| 180 | 0,51 | 0,53 | 10,68 | 11,54 (+0,86) | 11,39 (+0,71) |
-| 200 | 0,28 | 0,66 | 13,12 | 12,95 (−0,17) | 11,99 (−1,13) |
-| Mittel / RMS | **0,42** | 0,58 | | **RMS 0,60** | RMS 0,86 |
+| 40 | 0,036 | 0,09 | 0,17 | 100 % | 0,00 |
+| 60 | 0,048 | 0,12 | 0,18 | 100 % | 0,00 |
+| 80 | 0,044 | 0,14 | 0,19 | 100 % | −0,17 |
+| 100 | 0,057 | 0,14 | 0,25 | 100 % | 0,00 |
+| 120 | 0,077 | 0,17 | 0,25 | 100 % | 0,00 |
+| 140 | 0,041 | 0,12 | 0,26 | 99 % | −0,12 |
+| 160 | 0,043 | 0,14 | 0,22 | 100 % | −0,09 |
+| 180 | 0,089 | 0,31 | 0,43 | 91 % | −0,05 |
+| 200 | 0,093 | 0,33 | 0,41 | 87 % | −0,02 |
+| alle | **0,059** | 0,17 | | 98 % | RMS 0,08 |
 
-Der Austrittsversatz ist der Abstand der Austrittslinie der Leitlinie von der Startlinie, gemessen in der Schablone (Messunsicherheit
-etwa 0,4 m). Die Winkel 40 bis 100 gon und 200 gon liegen innerhalb von 0,5 m. Bei 160 gon und 180 gon bleibt eine Abweichung von
-etwa 1 m. Mit Rampen ist das Ergebnis bei jedem Winkel mindestens so gut wie ohne.
-Die Messwerte der Austrittslinien stehen im Selbsttest (Toleranz 0,4 bis 1,4 m).
+Zum Vergleich die erste Fassung (ein Gesetz für alle Winkel): Mittel 0,42 m, Austrittsversatz RMS 0,60 m. Mit dem reinen Kreisbogen: Mittel 0,58 m,
+RMS 0,86 m. Ein Pixel der Schablone ist 0,06 m. Die Werte bis 160 gon liegen also bei ein bis zwei Pixeln. Bei 180 und 200 gon bleibt eine
+Abweichung bis 0,4 m an einzelnen Stellen. Die Rampen können dort mit zwei Längen die Form der Schablone nicht ganz erreichen.
 
-### 3.2 Die 200-gon-Kurve im Detail
-- Außenbogen und Ausschwenken des Aufliegers (mit der Leitlinie der Schablone): 0,01 m mittlerer Abstand.
-- Mit der Leitlinie des Programms: mittlerer Abstand 0,28 m, 52 % der Hüllkurve innerhalb von 0,25 m. Der Kreisbogen kam auf 0,66 m und 21 %
-  (Start der Kurve so gewählt, dass alle neun Winkel zusammen am besten passen). Mit dem für 200 gon allein besten Start waren es 0,52 m und 34 %.
-- Max. Lenkwinkel 45,8 gon (Grenze 45,8 gon), max. Knickwinkel 69,7 gon (Grenze 100 gon; vorher nötig 82,4 gon).
+### 3.2 Endstellung
+Die Fahrzeuge im Programm stehen am Ende auf den Fahrzeugen der Schablone: Die Vorderachse jeder Kurve liegt 44,8 m (200 gon) bis 51,2 m
+(40 gon) vom Start, gemessen an der roten Endkappe der Schablone.
 
 ### 3.3 Selbsttest im Programm
-`Sim.selfTest()` (Schaltfläche „Kinematik prüfen“) hat jetzt 64 Prüfungen, alle bestanden. Neu:
+`Sim.selfTest()` (Schaltfläche „Kinematik prüfen“) hat jetzt 65 Prüfungen, alle bestanden. Neu:
 Maße der Vorlage (6,20 / 13,59 / 16,50 m), Sattelzapfen 0,73 m vor der Hinterachse, Lenkwinkel 45,8 gon und R 6,00 m,
 zwei Körper ohne Faltenbalg, Gesamtlänge und Überhänge der Polygone, konstanter Abstand Zapfen–Achsgruppe, Knickwinkel einer
 Wende, zu kleiner Grenzwert wird erkannt, Lenkrampen für **alle** Fahrzeuge (40 bis 300 gon: fahrbar, Lenkwinkel im Limit, keine
-Sprünge), Wende mit Rampen ist breiter als mit Kreisbogen, Austrittslinien der Schablone (40 bis 200 gon).
+Sprünge), Wende mit Rampen ist breiter als mit Kreisbogen, Austrittslinien der Schablone (40 bis 200 gon, auf 0,25 m genau),
+äußerster Punkt der Leitlinie bei 200 gon (−6,44 m in der Schablone).
 Die Zufallsprüfungen mit vorangehendem Bogen schließen den Sattelzug aus: Nach einem engen Bogen liegt er schon nahe am
 Grenzwert des Knickwinkels, dann ist eine weitere große Kurve nicht immer fahrbar. Das ist richtig so.
 Im Browser (Chromium, `file://`) liefen außerdem die Oberfläche (Fahrzeugauswahl, Felder, Skalierung, Zeichnen von neun Kurven
 mit dem Sattelzug) und die älteren Fahrzeuge (PKW, Müllfahrzeug mit Nachlaufachse, Gelenkbus) ohne Fehler in der Konsole.
 
 ## 4. Grenzen
-- Nur die 200-gon-Kurve wurde als Leitlinie digitalisiert. Für die anderen Winkel gibt es nur die Austrittslinien (siehe 3.1) und
-  den Abstand der Hüllkurven. Die Form der Rampen (`rampPow` = 2) ist ein Anpassungsgesetz an neun Messwerte, kein belegtes Gesetz.
-- Bei 160 und 180 gon ist die Austrittslinie etwa 1 m zu weit außen. Die Rampen wurden nur für das Fahrzeug „Sattelzug 16,50 m“
-  angepasst. Für andere Fahrzeuge bleiben sie 0 (Kreisbogen), bis es eine Schablone dafür gibt.
+- Die Rampentabelle gilt für den Sattelzug und nur, wenn die Kurve 3,75 m vor der Vorderkante des Fahrzeugs im Startbild beginnt (so ist die
+  Schablone gezeichnet). Beginnt der Benutzer die Kurve woanders, ist die Form dieselbe, aber verschoben.
+- Die Tabelle ist an das Bild der Schablone angepasst (neun Kurven, Messfehler etwa ein Pixel = 0,06 m). Zwischen den Kurven wird interpoliert.
+  Sie ist keine Aussage über das Fahren eines echten Sattelzugs.
+- Bei 180 und 200 gon bleiben Abweichungen bis 0,4 m an einzelnen Stellen.
 - Die schwarzen Linien der Schablone (vermutlich Radspuren) und die Radstellung wurden nicht geprüft.
 - Der Auflieger kann bei großem Knickwinkel an die Kabine stoßen. Das Programm prüft das nicht. Die Schablone zeigt es auch nicht.
 - Die Rampen gelten nur für „Kurve nach Winkel“. Ecken (G) und „Bogen durch Punkt“ (B) haben weiter keine Lenkübergänge.

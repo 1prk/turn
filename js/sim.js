@@ -29,6 +29,8 @@
    * rampIn, rampOut = path length in meters over which the steering goes from straight to full lock, and from full lock back to straight,
    * in a turn by angle (driving style 1). 0 = no ramps (the turn is an arc, tangential to the lines).
    * rampOut is the length for a turn of 200 gon. rampPow = the power for shorter turns: ramp out = rampOut * (sweep / 200 gon) ^ rampPow.
+   * rampTable = rows [turn in gon, rampIn, rampOut]. If it is there, it replaces rampIn, rampOut and rampPow.
+   * The lengths between the rows are interpolated. Use it for a vehicle that has a template with its own turns.
    * ratio = steering ratio. It is the steering wheel angle divided by the road wheel angle. */
   Sim.PRESETS = [
     { name: 'PKW', wb: 2.86, front: 0.92, rear: 1.10, width: 1.89, rOuter: 5.85, track: 1.60, ratio: 13, gap: 0, trail: false, preset: true },
@@ -46,10 +48,14 @@
     // rear = hitch + axle2 + rearOver = -0.73 + 7.60 + 4.25 = 11.12 m. rOuter = outer turning circle radius 7.9 m.
     // knickGon: a turn of 200 gon needs about 70 gon with the steering ramps, and 82 gon with a plain arc (see Sim.articTurn).
     // 100 gon is 90 degrees, the usual limit of a kingpin.
-    // rampIn, rampOut, rampPow: the steering ramps that the template shows (fitted to the template, see docs/validierung-sattelzug.md).
+    // rampTable: the steering ramps of the nine curves of the template (fitted to the template, see docs/validierung-sattelzug.md).
     { name: 'Sattelzug 16,50 m', wb: 3.95, front: 1.43, rear: 11.12, width: 2.55, rOuter: 7.9, track: 2.00, ratio: 20, gap: 0, trail: false,
       artic: true, semi: true, hitch: -0.73, axle2: 7.60, rearOver: 4.25, towRear: 0.82, hitchFront: 1.74, axles2: 3, gap2: 1.26,
-      knickGon: 100, rampIn: 0.5, rampOut: 24, rampPow: 2, preset: true }
+      knickGon: 100, rampIn: 0, rampOut: 0, rampPow: 0, preset: true,
+      // Rows: [turn in gon, ramp in, ramp out] in meters. Fitted for each of the nine curves of the template, so that the swept area
+      // fits the template (mean distance 0.04 to 0.09 m, see docs/validierung-sattelzug.md). The steering starts 3.75 m in front of the tractor front.
+      rampTable: [[40, 1.10, 2.50], [60, 1.00, 6.00], [80, 0.90, 5.50], [100, 1.00, 6.00], [120, 1.00, 0.55],
+                  [140, 1.20, 4.00], [160, 1.30, 5.00], [180, 2.30, 14.00], [200, 1.30, 24.50]] }
   ];
   Sim.DEFAULT_VEHICLE = Object.assign({}, Sim.PRESETS[0]);
 
@@ -214,7 +220,8 @@
   Sim.driveOpts = function (v) {
     const lim = Sim.steerLimit(v);
     if (!lim) return null;
-    return { step: 0.05, dMax: lim.delta, rFront: lim.rFront, rMax: 200, rampIn: v.rampIn > 0 ? v.rampIn : 0, rampOut: v.rampOut > 0 ? v.rampOut : 0, rampPow: v.rampPow > 0 ? v.rampPow : 0 };
+    return { step: 0.05, dMax: lim.delta, rFront: lim.rFront, rMax: 200, rampIn: v.rampIn > 0 ? v.rampIn : 0, rampOut: v.rampOut > 0 ? v.rampOut : 0, rampPow: v.rampPow > 0 ? v.rampPow : 0,
+      rampTable: Array.isArray(v.rampTable) && v.rampTable.length ? v.rampTable : null };
   };
 
   /* Driving style 1.
@@ -302,7 +309,7 @@
       if (!(aa > 1e-6)) { ends[e.src] = { x: pose.x, y: pose.y }; return; }
       const R = e.R > 0 ? e.R : o.rFront, sign = sweep > 0 ? 1 : -1;
       if (R < o.rFront - 1e-6) setFail({ kind: 'radius', R: R, rMin: o.rFront });
-      if (o.rampIn > 0 || o.rampOut > 0) {
+      if (o.rampTable || o.rampIn > 0 || o.rampOut > 0) {
         // Steering ramps (driving style 1: the driver steers in and out while the vehicle moves).
         // The steering angle changes at a constant rate along the path: from 0 to the full angle over o.rampIn meters,
         // and back to 0 over o.rampOut meters. The path of the front axle follows from the one-track model
@@ -313,9 +320,17 @@
         const dFull = Math.min(o.dMax, Math.asin(Math.min(1, v.wb / R)));      // The steering angle for the radius R of the front axle.
         // The ramp out is longer for a bigger turn: rampOut is the length for 200 gon. For a smaller turn it is shorter
         // by the factor (sweep / 200 gon) to the power rampPow (0 = the same length for all turns). A turn of more than 200 gon uses rampOut.
-        const outScale = Math.pow(Math.min(1, aa / Math.PI), o.rampPow);
+        // A table (o.rampTable) replaces this rule. Each row is [turn in gon, ramp in, ramp out]. The lengths between the rows are interpolated.
+        let rIn = o.rampIn, rOut = o.rampOut * Math.pow(Math.min(1, aa / Math.PI), o.rampPow);
+        if (o.rampTable) {
+          const tab = o.rampTable, g = aa * 200 / Math.PI, n = tab.length;
+          let i = 0;
+          while (i < n - 1 && g >= tab[i + 1][0]) i++;
+          if (g <= tab[0][0] || i >= n - 1) { const r = g <= tab[0][0] ? tab[0] : tab[n - 1]; rIn = r[1]; rOut = r[2]; }
+          else { const u = (g - tab[i][0]) / (tab[i + 1][0] - tab[i][0]); rIn = tab[i][1] + u * (tab[i + 1][1] - tab[i][1]); rOut = tab[i][2] + u * (tab[i + 1][2] - tab[i][2]); }
+        }
         const run = (dp, H, ds, keep) => {
-          const l1 = Math.max(1e-6, o.rampIn * dp / o.dMax), l2 = Math.max(1e-6, o.rampOut * outScale * dp / o.dMax), tot = l1 + H + l2;
+          const l1 = Math.max(1e-6, rIn * dp / o.dMax), l2 = Math.max(1e-6, rOut * dp / o.dMax), tot = l1 + H + l2;
           let x = pose.x, y = pose.y, th = 0, s = 0;
           while (s < tot - 1e-9) {
             const st = Math.min(ds, tot - s), sm = s + st / 2;
@@ -788,7 +803,7 @@
     // Turn by angle (the turn template of the RBSV, the corner path of AutoTURN).
     // A turn with 200 gon is a turn around in one movement. The radius is the minimum turning circle.
     // This test is for the plain arc. The vehicles have no steering ramps here.
-    for (const veh2 of Sim.PRESETS.map((p) => Object.assign({}, p, { rampIn: 0, rampOut: 0, rampPow: 0 }))) {
+    for (const veh2 of Sim.PRESETS.map((p) => Object.assign({}, p, { rampIn: 0, rampOut: 0, rampPow: 0, rampTable: null }))) {
       const o2 = Sim.driveOpts(veh2);
       const t200 = Sim.makeTurn([pt(0, 0), pt(20, 0)], 1, Math.PI, 0, veh2, o2), e2 = t200.run.end;
       add(veh2.name + ': Wende mit 200 gon in einem Zug, Endpunkt auf 1 mm genau',
@@ -893,7 +908,7 @@
       'R = ' + tzLow.run.lastArc.R.toFixed(2) + ' m statt ' + oz.rFront.toFixed(2) + ' m');
     // Steering ramps: the steering angle stays in the limit, the end direction is exact, the path has no jumps. A turn without ramps is not changed.
     for (const veh2 of Sim.PRESETS) {
-      const vr = Object.assign({}, veh2, { rampIn: 3, rampOut: 10, rampPow: 1 }), or = Sim.driveOpts(vr);
+      const vr = Object.assign({}, veh2, { rampIn: 3, rampOut: 10, rampPow: 1, rampTable: null }), or = Sim.driveOpts(vr);
       let okR = true, detail = '';
       for (const g2 of [40, 100, 200, 300]) {
         const t = Sim.makeTurn([pt(0, 0), pt(-20, 0)], 1, g2 * Math.PI / 200, 0, vr, or), q2 = t.run.smp;
@@ -905,21 +920,26 @@
       add('Lenkrampen (' + veh2.name + '): 40 bis 300 gon fahrbar, Lenkwinkel im Limit, ohne Sprünge', okR, detail);
     }
     // The ramp makes the turn wider. With a ramp out, the vehicle turns a part of the angle while the steering comes back.
-    const noRamp = Sim.buildRoute([pt(0, 0), pt(-3.75, 0), { t: 'turn', sweep: -Math.PI, R: 0 }], sz, Object.assign({}, oz, { rampIn: 0, rampOut: 0, rampPow: 0 })).end;
+    const noRamp = Sim.buildRoute([pt(0, 0), pt(-3.75, 0), { t: 'turn', sweep: -Math.PI, R: 0 }], sz, Object.assign({}, oz, { rampIn: 0, rampOut: 0, rampPow: 0, rampTable: null })).end;
     const wRamp = Sim.buildRoute([pt(0, 0), pt(-3.75, 0), { t: 'turn', sweep: -Math.PI, R: 0 }], sz, oz).end;
     add('Lenkrampen: die Wende mit 200 gon wird mit Rampen breiter als der Kreisbogen (2R)', Math.abs(wRamp.y) > Math.abs(noRamp.y) + 0.5, 'Versatz ' + Math.abs(wRamp.y).toFixed(2) + ' m statt ' + Math.abs(noRamp.y).toFixed(2) + ' m');
     // Compare the exit lines of the template with the model. The template has nine curves, 40 to 200 gon.
     // The values are measured in the template picture (exit line of the guide line, distance from the line of the start, in meters).
-    // The tolerance is the uncertainty of the measurement (about 0.4 m) and the remaining difference of the model.
+    // The ramp table is fitted to these lines and to the envelope of the template. The tolerance is the uncertainty of the measurement.
     // The turn starts 3.75 m in front of the tractor front (5.18 m after the front axle at the start).
-    const TPL = [[40, 1.12, 0.6], [60, 2.40, 0.7], [80, 3.78, 0.7], [100, 5.12, 0.6], [120, 6.22, 0.7], [140, 7.76, 0.8], [160, 8.74, 1.4], [180, 10.68, 1.2], [200, 13.12, 0.4]];
-    let tplOk = true, tplTxt = [];
+    const TPL = [[40, 1.12], [60, 2.40], [80, 3.78], [100, 5.12], [120, 6.22], [140, 7.76], [160, 8.74], [180, 10.68], [200, 13.12]];
+    let tplOk = true, tplTxt = [], tplMax = 0;
     for (const row of TPL) {
       const zt = Sim.makeTurn([pt(1.43, 0), pt(-3.75, 0)], -1, row[0] * Math.PI / 200, 0, sz, oz), ze = zt.run.end, w = Math.cos(ze.h) * ze.y - Math.sin(ze.h) * ze.x;
-      if (Math.abs(w - row[1]) > row[2]) tplOk = false;
+      tplMax = Math.max(tplMax, Math.abs(w - row[1]));
+      if (Math.abs(w - row[1]) > 0.25) tplOk = false;
       tplTxt.push(row[0] + ' gon: ' + w.toFixed(2) + ' (' + row[1].toFixed(2) + ')');
     }
-    add('Sattelzug: Austrittslinien der Schablone (40 bis 200 gon) innerhalb der Messtoleranz', tplOk, 'Modell (Vorlage) in m: ' + tplTxt.join('; '));
+    // The leftmost point of the guide line (front axle) of the 200 gon curve: measured in the template 6.44 m behind the tractor front of the start picture.
+    const z200 = Sim.buildRoute([pt(1.43, 0), pt(-3.75, 0), { t: 'turn', sweep: -Math.PI, R: 0 }], sz, oz);
+    let zMinX = Infinity; z200.smp.forEach((q) => { zMinX = Math.min(zMinX, q.Fx); });
+    add('Sattelzug: 200 gon, der äußerste Punkt der Leitlinie liegt wie in der Schablone bei −6,44 m', closeTo(zMinX, -6.44, 0.25), 'Modell ' + zMinX.toFixed(2) + ' m');
+    add('Sattelzug: Austrittslinien der Schablone (40 bis 200 gon) auf 0,25 m genau', tplOk, 'größte Abweichung ' + tplMax.toFixed(2) + ' m. Modell (Vorlage) in m: ' + tplTxt.join('; '));
     return res;
   };
 

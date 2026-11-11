@@ -38,7 +38,10 @@
   const STORE = 'schleppkurve.vehicles.v1';
   const FIELDS = { v_wb: 'wb', v_front: 'front', v_rear: 'rear', v_width: 'width', v_rout: 'rOuter', v_track: 'track', v_ratio: 'ratio', v_gap: 'gap',
                    v_hitch: 'hitch', v_axle2: 'axle2', v_rearOver: 'rearOver', v_knick: 'knickGon',
-                   v_tractorRear: 'tractorRear', v_trailerFront: 'trailerFront', v_trailerWidth: 'trailerWidth' };
+                   v_tractorRear: 'tractorRear', v_trailerFront: 'trailerFront', v_trailerWidth: 'trailerWidth',
+                   v_axles2: 'axles2', v_gap2: 'gap2', v_rampIn: 'rampIn', v_rampOut: 'rampOut', v_rampPow: 'rampPow' };
+  // These values can be 0. All other values must be more than 0. The distance kingpin to rear axle (hitch) of a semitrailer combination can be negative.
+  const ZERO_OK = ['gap', 'gap2', 'rampIn', 'rampOut', 'rampPow'];
   let vehicles = Sim.PRESETS.map(Sim.freshPreset), selIdx = 0, presetNote = '';
   try {      // The browser can block the storage. The page also works without it.
     const saved = JSON.parse(localStorage.getItem(STORE));
@@ -316,8 +319,23 @@
   const kvHtml = (rows) => rows.map((r) => '<span>' + r[0] + '</span><b>' + r[1] + '</b>').join('');
 
   /* The rows for the articulation angle that the turning circle needs, compared with the limit of the vehicle. */
+  const articCache = {};
   function articRows() {
     if (!veh.artic) return [];
+    if (veh.kind === 'semi') {
+      // There is no steady-state angle (the kingpin circle is smaller than the trailer). Show the angle of a turn by 200 gon.
+      // The result is kept, because the calculation takes some time.
+      const st0 = Sim.articSteady(veh);
+      if (st0 == null) {
+        const key = JSON.stringify([veh.wb, veh.front, veh.width, veh.rOuter, veh.hitch, veh.axle2, veh.rampIn, veh.rampOut, veh.rampPow, veh.rampTable]);
+        if (!(key in articCache)) articCache[key] = Sim.articTurn(veh, 200);
+        const a = articCache[key];
+        if (a == null) return [['Gelenk', '<span class="bad">Maße passen nicht</span>']];
+        const ok0 = veh.knickGon * Math.PI / 200 >= a;
+        return [['Knickwinkel bei einer Wende (200 gon)', f(gon(a), 1) + ' gon'],
+                ['Grenzwert Knickwinkel', f(veh.knickGon, 1) + ' gon' + (ok0 ? '' : ' <span class="bad">zu klein</span>')]];
+      }
+    }
     const st = Sim.articSteady(veh);
     if (st == null) return [['Gelenk', '<span class="bad">Maße passen nicht</span>']];
     const ok = veh.knickGon * Math.PI / 200 >= st;
@@ -699,9 +717,11 @@
       ctx.globalAlpha = alpha;
       ctx.translate(p.Tx, p.Ty); ctx.rotate(p.th2);
       ctx.fillStyle = '#222';
-      wheel(0, -t, 0); wheel(0, t, 0);
+      const n2 = v.axles2 > 1 ? Math.round(v.axles2) : 1, g2 = v.gap2 > 0 ? v.gap2 : 0;       // The axles of the rear body, centered on the axle point.
+      const xs2 = []; for (let k = 0; k < n2; k++) xs2.push((k - (n2 - 1) / 2) * g2);
+      xs2.forEach((x) => { wheel(x, -t, 0); wheel(x, t, 0); });
       ctx.strokeStyle = color; ctx.lineWidth = um;
-      ctx.beginPath(); ctx.moveTo(0, -t); ctx.lineTo(0, t); ctx.stroke();
+      ctx.beginPath(); xs2.forEach((x) => { ctx.moveTo(x, -t); ctx.lineTo(x, t); }); ctx.stroke();
       ctx.restore();
     }
   }
@@ -1103,11 +1123,14 @@
     $('v_kind').value = kind;
     $('articBox').style.display = kind === 'rigid' ? 'none' : '';
     $('semiBox').style.display = kind === 'semi' ? '' : 'none';
-    $('semiNote').style.display = kind === 'semi' && veh.preset ? '' : 'none';
+    $('semiNote').style.display = kind === 'semi' && veh.placeholder ? '' : 'none';
     ['l_hitch', 'l_axle2', 'l_rearOver', 'l_knick'].forEach((id, i) => { if (LABELS[kind]) $(id).textContent = LABELS[kind][i]; });
     if (kind === 'semi') $('v_hitch').removeAttribute('min'); else $('v_hitch').setAttribute('min', '0');      // The kingpin of a semitrailer is in front of the axle.
     $('v_rear').disabled = kind !== 'rigid';           // For an articulated vehicle, the rear overhang is the sum of the three values.
     $('v_trail').disabled = kind !== 'rigid';
+    const tab = !!(veh.rampTable && veh.rampTable.length);          // A table of the template replaces the three ramp fields.
+    ['v_rampIn', 'v_rampOut', 'v_rampPow'].forEach((id) => { $(id).disabled = tab; });
+    $('rampNote').style.display = tab ? '' : 'none';
   }
 
   /* Choose the vehicle for the active driving line. */
@@ -1142,9 +1165,9 @@
   Object.keys(FIELDS).forEach((id) => {
     $(id).addEventListener('input', () => {
       const v = parseFloat($(id).value), fld = FIELDS[id];
-      // The distance of the rear axles can be 0 (one rear axle). The hitch of a semitrailer is negative (in front of the rear axle).
+      // The distance of the rear axles can be 0 (one rear axle). The same for the ramps and the distance of the axles of the semitrailer. The hitch of a semitrailer is negative (in front of the rear axle).
       // All other values must be more than 0.
-      const ok = fld === 'hitch' ? isFinite(v) && (veh.kind === 'semi' || v >= 0) : fld === 'gap' ? v >= 0 : v > 0;
+      const ok = fld === 'hitch' ? isFinite(v) && (veh.kind === 'semi' || v >= 0) : ZERO_OK.includes(fld) ? v >= 0 : v > 0;
       if (ok) {
         veh[FIELDS[id]] = v;
         if (veh.artic && ['hitch', 'axle2', 'rearOver'].includes(FIELDS[id])) {

@@ -56,6 +56,15 @@ Schleppkurvenschablonen für **Richtungsänderungswinkel von 40 bis 200 gon** an
   begrenzt.
 - **Gerade nach Bogen oder Kurve:** Sie führt tangential geradeaus heraus. Punkte daneben werden auf diese Linie gelegt.
 
+**Sattelzug und Lenkrampen:** Die Voreinstellung „Sattelzug 16,50 m“ (Zugmaschine 2 Achsen, Auflieger 3 Achsen, Sattelzapfen 0,73 m vor der
+Hinterachse) hat zwei Körper ohne Faltenbalg und Lenkrampen: Bei „Kurve nach Winkel“ ändert sich der Lenkwinkel mit konstanter Rate über der
+Wegstrecke (Fahrweise 1: „lenkt stetig ein und aus“). Die Längen sind für den Sattelzug je Winkel (40 bis 200 gon) an die Schablone angepasst
+(Hüllkurve im Mittel 0,06 m neben den Linien der Schablone). Fahrzeuge mit `rampIn = rampOut = 0` fahren wie bisher einen Kreisbogen.
+Prüfung gegen die Schablone „Schleppkurve 4, Sattelzug“: [docs/validierung-sattelzug.md](docs/validierung-sattelzug.md).
+Das Müllfahrzeug 3-achsig, der Gelenkbus und der neue **Reisebus 12 m** (Voreinstellung 7) haben ebenfalls Rampentabellen, angepasst an ihre
+Schablonen (Hüllkurve im Mittel 0,02 bis 0,04 m neben den Linien): [docs/validierung-schablonen.md](docs/validierung-schablonen.md).
+Die Rampen gelten nur, wenn die Kurve auf eine Gerade folgt. Nach einem Bogen oder einer Kurve fährt das Programm einen einfachen Kreisbogen.
+
 Beim Wenden mit 200 gon und Mindestradius liegt der Außenradius der Karosserie genau auf dem Wendekreis (im Selbsttest:
 PKW 5,85 m, LKW 9,45 m bei 9,46 m). Der Platzbedarf ist deshalb etwa der Wendekreisdurchmesser, nicht der Querversatz der
 Leitlinie 2R.
@@ -92,7 +101,8 @@ Voreinstellungen (Maße in m, Überhang hinten und Radstand beziehen sich bei me
 | Müllfahrzeug 3-achsig | 9,90 | 4,77 | 1,53 | 3,60 | 2,55 | 10,25 | 38,9 gon |
 | Müllfahrzeug 3-achsig Nachlaufachse (*) | 9,95 | 4,575 | 1,35 | 4,025 | 2,55 | 8,60 | 39,1 gon |
 | Gelenkbus 3-achsig (18 m) | 18,00 | 5,90 | 2,70 | 9,40 (ab Mittelachse) | 2,55 | 11,40 | 48,4 gon |
-| Sattelzug 16,50 m (**Platzhalter**) | 16,50 | 3,80 | 1,40 | 11,30 (ab Hinterachse der Zugmaschine bis Ende Auflieger) | 2,55 | 12,50 | 22,9 gon |
+| Sattelzug 16,50 m (Maße der Schablone) | 16,50 | 3,95 | 1,43 | 11,12 (ab Hinterachse der Zugmaschine bis Ende Auflieger) | 2,55 | 7,90 | 45,8 gon |
+| Reise-/Linienbus 12,0 m | 12,00 | 5,90 | 2,80 | 3,30 | 2,55 | 10,50 | 57,8 gon |
 
 Die Fahrzeuge mit drei Achsen werden mit drei Achsen gezeichnet. Die Hinterachse im Modell ist die Mitte der beiden
 hinteren Achsen. Der **Abstand der Hinterachsen** (1,35 m) ist eine Annahme. Er wirkt nur auf die Darstellung, außer bei
@@ -196,10 +206,12 @@ Es gibt zwei Karosserien ohne Faltenbalg: das Rechteck der Zugmaschine und das R
 einfache Nonzero-Füllung die Vereinigung ergibt (im Selbsttest auf einem Raster geprüft). Die Hüllkurven laufen an allen
 Ecken beider Karosserien und an den inneren Seitenpunkten an beiden starren Achsen (Zugmaschine und Achsgruppe).
 
-**Alle Maße der Voreinstellung „Sattelzug 16,50 m“ sind PLATZHALTER**, plausible Annahmen und **keine** Werte der RBSV 2020
-(Gesamtlänge 16,50 m = 1,40 + 3,80 − 0,50 + 7,70 + 4,10; Wendekreisradius 12,50 m wie der Außenradius des Kraftkreises
-nach § 32d StVZO; Knickwinkel-Grenze 100 gon geraten). Vor dem Einsatz mit **RBSV 2020, Anhang 1** abgleichen. Im Code
-stehen sie in `Sim.SEMI_DEFAULTS` und `Sim.PRESETS`. Mit diesen Platzhaltern braucht der Wendekreis 52,0 gon Knickwinkel.
+Die Maße der Voreinstellung „Sattelzug 16,50 m“ sind die der Schablone „Schleppkurve 4, Sattelzug“ (Zugmaschine 2 Achsen: 1,43 + 3,95 + 0,82 m,
+Auflieger 3 Achsen: 1,74 + 7,60 + 4,25 m, gesamt 16,50 m, Wendekreisradius außen 7,9 m). Der Sattelzapfen liegt dann 0,73 m vor der Hinterachse der
+Zugmaschine. Mit diesen Maßen gibt es **keinen stationären Knickwinkel**: Der Zapfenkreis (4,57 m) ist kleiner als der Auflieger (7,60 m), `Sim.articSteady` gibt
+`null`. Die Fahrzeuginfo zeigt dann den Knickwinkel einer Wende mit 200 gon (`Sim.articTurn`, etwa 70 gon). Die Rampentabelle des Sattelzugs ist an die neun
+Kurven der Schablone angepasst (Fahrweise 1, siehe [docs/validierung-sattelzug.md](docs/validierung-sattelzug.md)). `Sim.SEMI_DEFAULTS` (Platzhalter) sind nur die
+Anfangswerte beim Umschalten der Bauart auf „Sattelzug“.
 
 ## Fahrkurven
 In Schritt 4 gibt es eine Liste von **Fahrkurven** (Reiter) mit **+**. Jede Fahrkurve hat eigene Punkte und ein eigenes
@@ -208,7 +220,7 @@ lässt sich bearbeiten. Die anderen sind abgeblendet in eigenen Farben sichtbar.
 
 ### Versionen der Voreinstellungen
 Gespeicherte Voreinstellungen überschrieben früher korrigierte Werte für immer. Jetzt hat der Programmstand eine
-**Version der Voreinstellungen** (`Sim.PRESET_VERSION`, aktuell 2). Der Browser speichert sie mit den Fahrzeugen, und jedes
+**Version der Voreinstellungen** (`Sim.PRESET_VERSION`, aktuell 3: Rampentabellen, Sattelzug mit den Maßen der Schablone, Reisebus 12 m). Der Browser speichert sie mit den Fahrzeugen, und jedes
 gespeicherte Voreinstellungs-Fahrzeug trägt eine Kopie der Werte, aus denen es entstanden ist (`base`). Beim Laden gilt für
 jedes Feld einer Voreinstellung:
 - Ist der gespeicherte Wert gleich dem Wert in `base`, hat der Nutzer ihn nicht geändert: Das Fahrzeug bekommt den **neuen
@@ -241,7 +253,8 @@ auf dem Wendekreis läuft (Selbsttest: Außenradius = Wendekreis). Zum Vergleich
 | Müllfahrzeug 3-achsig | 16,63 m | 20,50 m |
 | Müllfahrzeug 3-achsig Nachlaufachse | 13,54 m | 17,20 m |
 | Gelenkbus 3-achsig (18 m) | 17,13 m | 22,80 m |
-| Sattelzug 16,50 m (Platzhalter) | 21,57 m | 25,00 m |
+| Sattelzug 16,50 m | 11,99 m | 15,80 m |
+| Reise-/Linienbus 12,0 m | 14,96 m | 21,00 m |
 
 Die Anwendung zeigt beides: Die Fahrzeuginfo und das Ergebnis nennen den Wendekreis-⌀, und bei einem Bogen ab 150 gon steht
 der Querversatz der Leitlinie ausdrücklich als „nur die Leitlinie“ dabei.
@@ -318,13 +331,13 @@ Punkt, Kurve nach Winkel, Wende) gibt es in beiden Fahrweisen.
 | Müllfahrzeug 3-achsig | 38,9 gon | ca. 40 gon |
 | Müllfahrzeug 3-achsig Nachlaufachse | 39,1 gon | ca. 40 gon |
 | Gelenkbus 3-achsig (18 m) | 48,4 gon | Gelenkbusse sind von den 55 gon ausgenommen |
-| Sattelzug 16,50 m (Platzhalter) | 22,9 gon | ca. 40 gon (Platzhalter-Maße, siehe Sattelzug) |
+| Sattelzug 16,50 m | 45,8 gon | ca. 40 gon |
+| Reise-/Linienbus 12,0 m | 57,8 gon | Busse 55 gon |
 
 ### Annahmen und offene Punkte
 - Der Knick wird **aus dem Wendekreis berechnet** und nicht fest auf 40 oder 55 gon gesetzt, denn er ist das Ergebnis des
-  vollen Einschlags. Die Werte der Tabelle stimmen mit den „ca. 40 gon“ ungefähr überein, nur der Sattelzug mit seinen
-  Platzhaltermaßen (Wendekreis 12,50 m) nicht. Für einen Solobus (55 gon) gibt es keine Voreinstellung: Fahrzeug kopieren
-  und Maße eintragen, der Knick steht in der Fahrzeuginfo und im Ergebnis.
+  vollen Einschlags. Die Werte der Tabelle stimmen mit den „ca. 40 gon“ ungefähr überein, ungefähr auch beim Sattelzug (45,8 gon). Der Reisebus 12 m (57,8 gon) liegt nahe bei den 55 gon der RBSV für Busse. Für andere
+  Fahrzeuge: Fahrzeug kopieren und Maße eintragen, der Knick steht in der Fahrzeuginfo und im Ergebnis.
 - Fahrweise 2 lenkt an **jeder** Ecke bis zum Anschlag, auch bei kleinen Richtungsänderungen. Unter etwa 40 gon ist
   Fahrweise 1 realistischer. Die Anwendung schaltet nicht selbst um.
 - Gelenkfahrzeuge: Die vordere Karosserie dreht sich wie beschrieben. Die hintere folgt dem Gelenk wie bisher (Traktrix),

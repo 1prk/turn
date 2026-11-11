@@ -181,7 +181,15 @@
             <label for="v_tractorRear">Zugmaschine: Überhang hinter der Hinterachse [m]</label><input id="v_tractorRear" type="number" step="0.01" min="0">
             <label for="v_trailerFront">Auflieger: Überhang vor dem Sattelzapfen [m]</label><input id="v_trailerFront" type="number" step="0.01" min="0">
             <label for="v_trailerWidth">Auflieger: Breite [m]</label><input id="v_trailerWidth" type="number" step="0.01" min="0">
+            <label for="v_axles2">Auflieger: Anzahl Achsen (Darstellung)</label><input id="v_axles2" type="number" step="1" min="1">
+            <label for="v_gap2">Auflieger: Abstand der Achsen (Darstellung) [m]</label><input id="v_gap2" type="number" step="0.01" min="0">
           </div>
+          <div class="grid" style="margin-top:6px">
+            <label for="v_rampIn" title="Wegstrecke, auf der das Lenkrad bei „Kurve nach Winkel“ (Fahrweise 1) von geradeaus bis zum vollen Einschlag dreht. 0 = kein Übergang (Kreisbogen)">Lenkrampe ein [m]</label><input id="v_rampIn" type="number" step="0.5" min="0">
+            <label for="v_rampOut" title="Wegstrecke für das Zurücklenken bei einer Kurve von 200 gon. 0 = kein Übergang">Lenkrampe aus (bei 200 gon) [m]</label><input id="v_rampOut" type="number" step="0.5" min="0">
+            <label for="v_rampPow" title="Bei kleinerer Richtungsänderung ist die Rampe aus kürzer: Länge = Wert · (Winkel / 200 gon) hoch Exponent. 0 = immer gleich lang">Lenkrampe: Exponent</label><input id="v_rampPow" type="number" step="0.5" min="0">
+          </div>
+          <div class="mute small" id="rampNote" style="display:none">Dieses Fahrzeug nutzt die Lenkrampen seiner Schablone (Tabelle für 40 bis 200 gon, dazwischen interpoliert). Die drei Felder gelten nicht.</div>
           <div class="mute small">Radstand und Überhang hinten beziehen sich auf die Mitte der hinteren Achsen. Mit Nachlaufachse rechnet das Modell mit der vorderen der beiden Hinterachsen (feste Achse).</div>
           <div class="row"><button id="vehDel">Fahrzeug löschen</button><button id="vehReset">Voreinstellung wiederherstellen</button></div>
         </details>

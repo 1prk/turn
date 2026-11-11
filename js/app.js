@@ -286,7 +286,7 @@
     if (!veh.artic) return '';
     if (veh.semi) {
       // There is no steady-state angle. Show the angle of a turn by 200 gon. The result is kept, because the calculation takes some time.
-      const key = JSON.stringify([veh.wb, veh.front, veh.width, veh.rOuter, veh.hitch, veh.axle2, veh.rampIn, veh.rampOut, veh.rampPow]);
+      const key = JSON.stringify([veh.wb, veh.front, veh.width, veh.rOuter, veh.hitch, veh.axle2, veh.rampIn, veh.rampOut, veh.rampPow, veh.rampTable]);
       if (!(key in articCache)) articCache[key] = Sim.articTurn(veh, 200);
       const a = articCache[key];
       if (a == null) return ' · <span class="bad">Gelenkmaße passen nicht</span>';
@@ -840,6 +840,9 @@
     $('semiRow').style.display = veh.artic ? '' : 'none';
     $('v_semi').checked = !!veh.semi;
     $('semiBox').style.display = veh.artic && veh.semi ? '' : 'none';
+    const tab = !!(veh.rampTable && veh.rampTable.length);          // A table of the template replaces the three ramp fields.
+    ['v_rampIn', 'v_rampOut', 'v_rampPow'].forEach((id) => { $(id).disabled = tab; });
+    $('rampNote').style.display = tab ? '' : 'none';
     $('v_rear').disabled = !!veh.artic;           // For an articulated vehicle, the rear overhang is the sum of the three values.
   }
 
